@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Prediction Market Divergence</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Prediction Market Divergence</h1>
+      <p class="subtitle">Cross-venue Kalshi ↔ Polymarket signals</p>
+    </header>
+
+    <section id="health" class="card">
+      <h2>Status</h2>
+      <div id="health-body" class="muted">Loading…</div>
+    </section>
+
+    <section class="card">
+      <div class="row">
+        <h2>Active opportunities</h2>
+        <button id="refresh">Refresh</button>
+      </div>
+      <div id="opportunities" class="muted">Loading…</div>
+    </section>
+  </main>
+  <script>
+    async function loadHealth() {
+      const res = await fetch('/health');
+      const data = await res.json();
+      document.getElementById('health-body').innerHTML = `
+        <div><strong>Status:</strong> ${data.status}</div>
+        <div><strong>Last poll:</strong> ${data.last_poll_at || 'never'}</div>
+        <div><strong>Markets tracked:</strong> ${data.markets_tracked}</div>
+        <div><strong>Active opportunities:</strong> ${data.active_opportunities}</div>
+        <div><strong>Mode:</strong> ${data.sources?.mode || 'unknown'} (${data.sources?.runtime || 'local'})</div>
+      `;
+    }
+
+    async function loadOpportunities() {
+      const res = await fetch('/opportunities?min_score=0&limit=20');
+      const data = await res.json();
+      const el = document.getElementById('opportunities');
+      if (!data.opportunities?.length) {
+        el.innerHTML = '<p>No active opportunities above threshold.</p>';
+        return;
+      }
+      el.innerHTML = data.opportunities.map((o) => `
+        <article class="opp">
+          <h3>${o.title} <span class="score">score ${o.score}</span></h3>
+          <p>${o.market_a.venue}: ${(o.market_a.probability * 100).toFixed(0)}% · ${o.market_b.venue}: ${(o.market_b.probability * 100).toFixed(0)}% · gap ${o.difference_pct_points} pts</p>
+          <p class="muted">${o.lookback_context}</p>
+          <p>→ ${o.tweet_hint}</p>
+        </article>
+      `).join('');
+    }
+
+    async function refresh() {
+      await Promise.all([loadHealth(), loadOpportunities()]);
+    }
+
+    document.getElementById('refresh').addEventListener('click', refresh);
+    refresh();
+    setInterval(refresh, 60000);
+  </script>
+</body>
+</html>

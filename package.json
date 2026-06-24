@@ -1,0 +1,21 @@
+{
+  "name": "prediction-market-divergence",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler pages dev public --d1=DB --local",
+    "db:local": "wrangler d1 execute prediction-market-divergence --local --file=./migrations/0001_init.sql",
+    "db:remote": "wrangler d1 execute prediction-market-divergence --remote --file=./migrations/0001_init.sql",
+    "deploy": "wrangler pages deploy public",
+    "poll:local": "curl -s -X POST http://localhost:8788/poll | jq",
+    "health:local": "curl -s http://localhost:8788/health | jq"
+  },
+  "dependencies": {
+    "hono": "^4.7.5"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250214.0",
+    "typescript": "^5.8.2",
+    "wrangler": "^4.99.0"
+  }
+}

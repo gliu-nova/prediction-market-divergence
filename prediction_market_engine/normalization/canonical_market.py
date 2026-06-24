@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import datetime, timezone
@@ -53,35 +54,82 @@ def _extract_market_id(raw: dict[str, Any], venue: str) -> str:
     return str(raw.get("id") or raw.get("condition_id") or raw.get("slug") or "")
 
 
+def _to_probability(value: Any) -> Optional[float]:
+    if value is None or value == "":
+        return None
+    try:
+        p = float(value)
+    except (TypeError, ValueError):
+        return None
+    if p > 100.0:
+        return None
+    return p / 100.0 if p > 1.0 else p
+
+
 def _extract_probability(raw: dict[str, Any], venue: str) -> Optional[float]:
     if "yes_price" in raw and raw["yes_price"] is not None:
-        p = float(raw["yes_price"])
-        if p > 100.0:
-            return None
-        return p / 100.0 if p > 1.0 else p
+        p = _to_probability(raw["yes_price"])
+        if p is not None:
+            return p
+
+    if venue == "kalshi":
+        bid = _to_probability(raw.get("yes_bid_dollars"))
+        ask = _to_probability(raw.get("yes_ask_dollars"))
+        if bid is not None and ask is not None and bid > 0 and ask > 0:
+            return (bid + ask) / 2.0
+        for key in ("last_price_dollars", "yes_bid_dollars", "yes_ask_dollars"):
+            p = _to_probability(raw.get(key))
+            if p is not None and p > 0:
+                return p
+
     if venue == "polymarket":
         outcomes = raw.get("outcomePrices") or raw.get("outcome_prices")
+        if isinstance(outcomes, str):
+            try:
+                outcomes = json.loads(outcomes)
+            except json.JSONDecodeError:
+                outcomes = None
         if isinstance(outcomes, list) and outcomes:
-            p = float(outcomes[0])
-            return p / 100.0 if p > 1.0 else p
-    last_price = raw.get("last_price") or raw.get("yes_bid")
-    if last_price is not None:
-        p = float(last_price)
-        return p / 100.0 if p > 1.0 else p
+            p = _to_probability(outcomes[0])
+            if p is not None:
+                return p
+        for key in ("lastTradePrice", "bestBid", "bestAsk"):
+            p = _to_probability(raw.get(key))
+            if p is not None and p > 0:
+                return p
+
+    for key in ("last_price", "yes_bid", "last_price_dollars"):
+        p = _to_probability(raw.get(key))
+        if p is not None and p > 0:
+            return p
     return None
 
 
 def _extract_volume(raw: dict[str, Any]) -> Optional[float]:
-    for key in ("volume", "volume_24h", "volume24hr", "total_volume"):
+    for key in (
+        "volumeNum",
+        "volume",
+        "volume_fp",
+        "volume_24h_fp",
+        "volume_24h",
+        "volume24hr",
+        "total_volume",
+    ):
         if raw.get(key) is not None:
-            return float(raw[key])
+            try:
+                return float(raw[key])
+            except (TypeError, ValueError):
+                continue
     return None
 
 
 def _extract_liquidity(raw: dict[str, Any]) -> Optional[float]:
-    for key in ("liquidity", "open_interest", "liquidity_usd"):
+    for key in ("liquidityNum", "liquidity", "liquidity_dollars", "open_interest", "liquidity_usd"):
         if raw.get(key) is not None:
-            return float(raw[key])
+            try:
+                return float(raw[key])
+            except (TypeError, ValueError):
+                continue
     return None
 
 

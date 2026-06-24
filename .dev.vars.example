@@ -1,0 +1,3 @@
+# Local wrangler pages dev overrides (copy to .dev.vars)
+USE_MOCK=true
+# POLL_SECRET=dev-only-secret

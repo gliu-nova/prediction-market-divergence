@@ -1,48 +1,245 @@
 # Prediction Market Divergence
 
-Standalone signal engine that monitors prediction markets (Polymarket, Kalshi), detects cross-venue probability divergences, stores historical observations, and exposes ranked signals via FastAPI for the [`twitter-bot`](../twitter-bot) project to poll and tweet.
+Cross-venue prediction market signal engine (Kalshi ↔ Polymarket). Detects probability divergences, stores history, and exposes ranked opportunities via HTTP for [`twitter-bot`](../twitter-bot) to poll and tweet.
 
-## Architecture
+## Architecture comparison
+
+| | **prediction-market-divergence** (this repo) | **wacta-scoring** (reference) |
+|---|---|---|
+| Runtime | Cloudflare Pages Functions + Cron | Cloudflare Pages Functions |
+| API | Hono (`src/index.ts`, `functions/`) | Hono (`src/index.ts`, `functions/api/`) |
+| Database | Cloudflare D1 (SQLite) | Cloudflare D1 |
+| Deploy | GitHub Actions → `wrangler pages deploy` | Same |
+| Polling | Cron every 5 min (`functions/_scheduled.ts`) | N/A (user-driven CRUD) |
+| Local dev | `npm run dev` (cloud stack) or `python run.py` (legacy) | `npm run dev` |
+
+## Recommended cloud approach (implemented)
+
+**Option A: Cloudflare Pages Cron + D1** ✅
+
+Why this beats **Option B (GitHub Actions polling)**:
+
+| Criteria | Option A (chosen) | Option B |
+|---|---|---|
+| Cost | Workers/Pages/D1 free tiers | ~288 GHA runs/day burns minutes on private repos |
+| Laptop required | No | No |
+| Always-on API | Yes (`*.pages.dev`) | Needs separate Worker anyway |
+| Similar to wacta-scoring | Yes (Pages + D1 + Hono + GitHub deploy) | Partial |
+| Code rewrite | TypeScript poll engine added; Python kept for local/tests | Minimal Python change |
+
+The cloud stack mirrors wacta-scoring. Python FastAPI remains for local development and unit tests only.
 
 ```
-prediction_market_engine/
-  app.py              # FastAPI app + scheduler
-  config.py           # YAML + env config
-  models.py           # Pydantic schemas
-  storage.py          # SQLite persistence
-  engine.py           # Poll orchestration
-  sources/            # Venue adapters (mock, Kalshi, Polymarket)
-  normalization/      # Canonical schema + cross-venue matcher
-  signals/            # Divergence detection + scoring
-  api/                # HTTP routes
-tests/
+GitHub (main push)
+    → GitHub Actions deploy
+        → Cloudflare Pages (public API + dashboard)
+            → Cron */5 * * * * → poll Kalshi/Polymarket
+            → D1 (observations + signals + poll_state)
+twitter-bot
+    → GET https://YOUR.pages.dev/opportunities
 ```
 
-## Quick start
+---
+
+## Deploy to Cloudflare (production)
+
+### Prerequisites
+
+- Cloudflare account (free)
+- GitHub repo for this project
+- Node.js 22+ (`nvm use`)
+
+### 1. Push to GitHub
 
 ```bash
 cd prediction-market-divergence
-python3 -m venv .venv
-source .venv/bin/activate
+git add .
+git commit -m "Add Cloudflare Pages cloud deployment"
+git remote add origin https://github.com/YOUR_USER/prediction-market-divergence.git
+git push -u origin main
+```
+
+### 2. Create D1 database
+
+```bash
+npm install
+npx wrangler d1 create prediction-market-divergence
+```
+
+Copy the `database_id` into `wrangler.toml` (replace `REPLACE_WITH_YOUR_D1_DATABASE_ID`), then:
+
+```bash
+npm run db:remote
+```
+
+### 3. Create Cloudflare Pages project
+
+1. [Cloudflare Dashboard](https://dash.cloudflare.com) → **Workers & Pages** → **Create** → **Pages** → **Connect to Git**
+2. Select this repo
+3. Build settings:
+   - **Framework preset:** None
+   - **Build command:** (empty)
+   - **Build output directory:** `public`
+4. **Settings → Functions** → compatibility date `2026-06-10` (match `wrangler.toml`)
+
+### 4. Bind D1 + environment variables
+
+Pages project → **Settings** → **Bindings**:
+
+| Type | Name | Value |
+|------|------|-------|
+| D1 database | `DB` | `prediction-market-divergence` |
+
+**Settings → Environment variables** (production):
+
+| Name | Value | Notes |
+|------|-------|-------|
+| `USE_MOCK` | `false` | `true` for demo data |
+| `MIN_DIVERGENCE_PCT_POINTS` | `5` | |
+| `MIN_VOLUME` | `1000` | |
+| `LOOKBACK_DAYS` | `30` | |
+| `OPPORTUNITY_MAX_AGE_HOURS` | `24` | |
+
+**Secrets** (optional but recommended):
+
+```bash
+npx wrangler pages secret put POLL_SECRET --project-name=prediction-market-divergence
+```
+
+Protects `POST /poll`. Cron polls do not need this.
+
+### 5. GitHub Actions secrets
+
+Repo → **Settings → Secrets and variables → Actions**:
+
+| Secret | Where to get it |
+|--------|-----------------|
+| `CLOUDFLARE_API_TOKEN` | Cloudflare → My Profile → API Tokens → Edit Cloudflare Workers template |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare dashboard URL or Workers overview |
+
+Token needs **Cloudflare Pages Edit** + **D1 Edit**.
+
+### 6. Enable Cron Trigger
+
+After first deploy, confirm **Workers & Pages → your project → Settings → Cron Triggers** shows `*/5 * * * *`.
+
+If missing, redeploy with `wrangler.toml` `[triggers]` section (already in repo).
+
+### 7. Deploy
+
+Every push to `main` auto-deploys via `.github/workflows/deploy.yml`.
+
+Manual deploy:
+
+```bash
+npm run deploy
+# or
+./scripts/deploy.sh
+```
+
+Live URLs:
+
+- Dashboard: `https://prediction-market-divergence.pages.dev/`
+- Health: `https://prediction-market-divergence.pages.dev/health`
+- Opportunities: `https://prediction-market-divergence.pages.dev/opportunities`
+
+---
+
+## Verify cloud polling
+
+```bash
+# Health — check last_poll_at updates every ~5 minutes
+curl -s https://prediction-market-divergence.pages.dev/health | jq
+
+# Manual poll (if POLL_SECRET set, add header)
+curl -s -X POST https://prediction-market-divergence.pages.dev/poll | jq
+
+# Opportunities
+curl -s "https://prediction-market-divergence.pages.dev/opportunities?min_score=70" | jq
+```
+
+**Healthy signals:**
+
+- `last_poll_at` advances every 5 minutes
+- `sources.mode` is `live` (or `mock` if configured)
+- `sources.runtime` is `cloudflare-pages`
+- `status` is `ok` (or `degraded` if last poll errored — check logs)
+
+---
+
+## Logs, monitoring, rollback
+
+### Logs
+
+Cloudflare Dashboard → **Workers & Pages** → your project → **Logs** (Real-time Logs or Logpush).
+
+Filter for scheduled invocations (`_scheduled`) and HTTP errors.
+
+### Update
+
+```bash
+git push origin main   # auto-deploy
+```
+
+### Rollback
+
+Cloudflare Dashboard → **Deployments** → select previous deployment → **Rollback to this deployment**.
+
+Or redeploy an older git tag:
+
+```bash
+git checkout <good-commit>
+npm run deploy
+git checkout main
+```
+
+---
+
+## Remove local launchd service
+
+Once cloud is verified, stop the Mac background service:
+
+```bash
+./scripts/uninstall-local-service.sh
+```
+
+You no longer need launchd for production. Keep it only if you want a local mirror while developing.
+
+---
+
+## Local development
+
+### Cloud stack (recommended — matches production)
+
+```bash
+npm install
+npm run db:local
+cp .dev.vars.example .dev.vars   # USE_MOCK=true for local demo
+npm run dev
+```
+
+Open http://localhost:8788
+
+```bash
+npm run health:local
+npm run poll:local
+```
+
+### Legacy Python stack (unit tests / optional local server)
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python run.py
-```
-
-Service listens on `http://0.0.0.0:8080` by default. Mock data is enabled in `config.yaml` (`sources.use_mock: true`).
-
-### One-shot poll (no server)
-
-```bash
-python run.py --poll-once
-```
-
-### Run tests
-
-```bash
+python run.py              # long-running FastAPI on :8080
+python run.py --poll-once  # one-shot
 pytest -v
 ```
 
-## API endpoints
+`python run.py` is **not required** for production after cloud migration.
+
+---
+
+## API endpoints (same paths locally and in cloud)
 
 | Endpoint | Description |
 |----------|-------------|
@@ -56,138 +253,60 @@ pytest -v
 | `GET /opportunities/{id}` | Single opportunity detail |
 | `POST /poll` | Trigger manual poll cycle |
 
-### Example: latest signals
+### Example
 
 ```bash
-curl -s http://localhost:8080/signals/latest | jq
+curl -s "https://prediction-market-divergence.pages.dev/opportunities?min_score=70&min_difference_pct_points=10&topic=Fed&limit=5" | jq
 ```
 
-### Example: filtered opportunities
-
-```bash
-curl -s "http://localhost:8080/opportunities?min_score=70&min_difference_pct_points=10&topic=Fed&limit=5" | jq
-```
-
-### Example signal JSON
-
-```json
-{
-  "id": "kalshi_polymarket_fed_rates_fed_cut_sep_2026_2026_06_24",
-  "type": "prediction_market_divergence",
-  "title": "FED RATES ODDS DIVERGE",
-  "asset_or_topic": "Fed rates",
-  "market_a": {
-    "venue": "Kalshi",
-    "probability": 0.42,
-    "url": "https://kalshi.com/markets/fed-cut-sep-2026",
-    "market_id": "FED-CUT-SEP-2026",
-    "volume": 125000,
-    "liquidity": 45000
-  },
-  "market_b": {
-    "venue": "Polymarket",
-    "probability": 0.55,
-    "url": "https://polymarket.com/event/fed-cut-sep-2026",
-    "market_id": "poly-fed-cut-sep-2026",
-    "volume": 340000,
-    "liquidity": 120000
-  },
-  "difference_pct_points": 13.0,
-  "implied_arb_profit_pct": 13.0,
-  "lookback_context": "First cross-venue observation",
-  "score": 87,
-  "created_at": "2026-06-24T12:00:00+00:00",
-  "tweet_hint": "Kalshi and Polymarket disagree by 13 pts on fed rates odds.",
-  "is_active": true
-}
-```
+---
 
 ## Integrating with twitter-bot
 
-Poll this service on a schedule (e.g. every 5–15 minutes) from your existing bot. This project does **not** post to Twitter — it only produces structured signals.
-
-### Python example (twitter-bot consumer)
-
-```python
-import os
-import requests
-
-PMD_BASE = os.getenv("PMD_API_URL", "http://localhost:8080")
-
-def fetch_prediction_signals(min_score: int = 70) -> list[dict]:
-    resp = requests.get(
-        f"{PMD_BASE}/opportunities",
-        params={"min_score": min_score, "limit": 10},
-        timeout=15,
-    )
-    resp.raise_for_status()
-    return resp.json()["opportunities"]
-
-def signal_to_tweet(signal: dict) -> str:
-    a, b = signal["market_a"], signal["market_b"]
-    return (
-        f"{signal['title']}\n\n"
-        f"{a['venue']}: {a['probability']*100:.0f}%\n"
-        f"{b['venue']}: {b['probability']*100:.0f}%\n"
-        f"Gap: {signal['difference_pct_points']:.0f} pts\n\n"
-        f"{signal.get('lookback_context', '')}\n"
-        f"→ {signal['tweet_hint']}"
-    )
-
-# In your bot's scheduled run:
-for opp in fetch_prediction_signals(min_score=75):
-    tweet = signal_to_tweet(opp)
-    # pass to your existing posting engine / dedup logic
-```
-
-### curl health check (CI / cron)
-
-```bash
-curl -sf http://localhost:8080/health | jq '.status'
-```
-
-### Recommended env for twitter-bot
+Point twitter-bot at the **public** cloud URL (not localhost):
 
 ```env
-PMD_API_URL=http://localhost:8080
+# twitter-bot/.env
+PMD_API_URL=https://prediction-market-divergence.pages.dev
 ```
 
-Run the divergence service separately (local, Docker, or a small VM). Point `PMD_API_URL` at it.
+twitter-bot polls `/opportunities` on each scheduled run (`prediction_markets.enabled: true` in `config.yaml`).
 
-## Configuration
+---
 
-Edit `config.yaml`:
+## Free-tier limits to watch
 
-```yaml
-sources:
-  use_mock: true          # set false for live Kalshi/Polymarket APIs
+| Service | Free tier (approx.) | This project's usage |
+|---------|---------------------|----------------------|
+| Cloudflare Pages | 500 builds/month, unlimited requests | 1 deploy per push; API reads low |
+| Cloudflare Workers (Functions) | 100k requests/day | Cron 288/day + API traffic |
+| Cloudflare D1 | 5M rows read/day, 100k writes/day | ~6 markets/poll × 288 ≈ 1.7k obs/day |
+| GitHub Actions | 2000 min/month (private) | Deploy-only (~1 min/deploy) |
 
-detection:
-  min_divergence_pct_points: 5.0
-  min_volume: 1000.0
+Cron + D1 should stay **$0/month** at this scale. Upgrade only if traffic or storage grows substantially.
 
-service:
-  poll_interval_seconds: 300
+---
+
+## Repo layout
+
 ```
-
-Env overrides: `PMD_HOST`, `PMD_PORT`, `PMD_USE_MOCK`.
-
-## MVP scope
-
-- Mock ingestion with realistic Fed/BTC/recession markets
-- Cross-venue divergence detection (primary signal)
-- SQLite history for observations + signals
-- Modular source adapters (swap mock → live one venue at a time)
-- Repricing detector stub (logged, not yet API-surfaced)
-
-## Live APIs
-
-Set `sources.use_mock: false` in `config.yaml`. Kalshi and Polymarket adapters call public REST endpoints; malformed or empty responses are logged and skipped without crashing the poll cycle.
+prediction_market_engine/   # Python engine (local/tests)
+src/                        # TypeScript cloud engine (production)
+functions/
+  [[path]].ts               # Pages API handler
+  _scheduled.ts             # Cron poll handler
+public/                     # Dashboard static files
+migrations/                 # D1 schema
+wrangler.toml               # Cloudflare config
+.github/workflows/deploy.yml
+scripts/
+  deploy.sh
+  uninstall-local-service.sh
+```
 
 ## Future extensions
 
+- Fuzzy cross-venue market matching (live data currently sparse)
 - WebSocket push to twitter-bot
 - Additional venues
-- Fuzzy market matching / manual mapping table
-- Neg-risk / multi-outcome sum inefficiency detector
-- Rust hot-path service (if latency becomes critical)
+- Sync Python integration tests against cloud API

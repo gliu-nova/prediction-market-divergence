@@ -1,3 +1,5 @@
+import pytest
+
 from prediction_market_engine.normalization.canonical_market import normalize_raw_market
 
 
@@ -48,3 +50,32 @@ def test_rejects_invalid_probability():
 def test_rejects_missing_title():
     raw = {"venue": "kalshi", "ticker": "X", "yes_price": 0.5}
     assert normalize_raw_market(raw) is None
+
+
+def test_normalize_kalshi_live_price_fields():
+    raw = {
+        "venue": "kalshi",
+        "ticker": "FED-CUT-SEP-2026",
+        "title": "Fed cuts rates in September 2026 meeting",
+        "yes_bid_dollars": "0.40",
+        "yes_ask_dollars": "0.44",
+        "volume_fp": "125000.00",
+        "liquidity_dollars": "45000.00",
+    }
+    market = normalize_raw_market(raw)
+    assert market is not None
+    assert market.probability == pytest.approx(0.42)
+
+
+def test_normalize_polymarket_live_outcome_prices_string():
+    raw = {
+        "venue": "polymarket",
+        "id": "540817",
+        "question": "Will the Fed cut rates in September 2026?",
+        "outcomePrices": '["0.55", "0.45"]',
+        "volumeNum": 340000,
+        "liquidityNum": 120000,
+    }
+    market = normalize_raw_market(raw)
+    assert market is not None
+    assert market.probability == 0.55
