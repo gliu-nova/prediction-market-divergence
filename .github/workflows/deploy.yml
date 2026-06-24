@@ -24,4 +24,4 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           # Pages project (not Workers). --env="" targets top-level wrangler.toml config.
-          command: pages deploy public --project-name=prediction-market-divergence --env=""
+          command: pages deploy public --project-name=prediction-market-divergence
