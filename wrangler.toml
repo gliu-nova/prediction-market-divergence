@@ -8,9 +8,6 @@ binding = "DB"
 database_name = "prediction-market-divergence"
 database_id = "5602c6d4-25ae-4216-8c70-a7cf0720a8f0"
 
-[triggers]
-crons = ["*/5 * * * *"]
-
 [vars]
 ENVIRONMENT = "production"
 APP_NAME = "Prediction Market Divergence"
