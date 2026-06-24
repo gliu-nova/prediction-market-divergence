@@ -1240,3 +1240,108 @@ INFO:     127.0.0.1:51239 - "GET /opportunities?min_score=75&min_difference_pct_
 2026-06-24 07:05:01,004 INFO prediction_market_engine.normalization.matcher: Matched 0 cross-venue pairs from 104 markets
 2026-06-24 07:05:01,013 INFO prediction_market_engine.engine: Poll complete: 104 markets, 0 pairs, 0 opportunities
 2026-06-24 07:05:01,013 INFO apscheduler.executors.default: Job "PredictionMarketEngine.poll (trigger: interval[0:05:00], next run at: 2026-06-24 07:10:00 EDT)" executed successfully
+2026-06-24 07:10:00,699 INFO apscheduler.executors.default: Running job "PredictionMarketEngine.poll (trigger: interval[0:05:00], next run at: 2026-06-24 07:15:00 EDT)" (scheduled at 2026-06-24 07:10:00.621526-04:00)
+2026-06-24 07:10:00,701 INFO prediction_market_engine.engine: Starting poll cycle (mock=False)
+2026-06-24 07:10:00,798 INFO httpx: HTTP Request: GET https://api.elections.kalshi.com/trade-api/v2/markets?limit=100&status=open "HTTP/1.1 200 OK"
+2026-06-24 07:10:00,840 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S202606BBD976E55-FD664D2E18E: no probability
+2026-06-24 07:10:00,840 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026D9E5CA5E593-C9C50433923: no probability
+2026-06-24 07:10:00,840 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026563C01C04CF-A2EBA979729: no probability
+2026-06-24 07:10:00,840 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S202614C6E217C5A-AB00062F6B2: no probability
+2026-06-24 07:10:00,840 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVECROSSCATEGORY-S2026E6A03FE0564-FCCEB4F8C23: no probability
+2026-06-24 07:10:00,840 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026773FFBC9BA0-42C1A66512B: no probability
+2026-06-24 07:10:00,841 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026C9809F555F0-9162ACF0046: no probability
+2026-06-24 07:10:00,841 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVECROSSCATEGORY-S20266C4209E3F7B-AFA5375C8A0: no probability
+2026-06-24 07:10:00,841 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026FC720DBFAD3-8FEDDA59CA9: no probability
+2026-06-24 07:10:00,841 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S20263542572E136-B0D3AA1E195: no probability
+2026-06-24 07:10:00,841 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026BBD936F401A-D3CF2707718: no probability
+2026-06-24 07:10:00,841 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVECROSSCATEGORY-S20269A93BC26477-3D15620BC79: no probability
+2026-06-24 07:10:00,841 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026AF6C1A1E1EB-9B7945713E0: no probability
+2026-06-24 07:10:00,841 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVECROSSCATEGORY-S2026EB6C9538522-3C1DD2CCD47: no probability
+2026-06-24 07:10:00,841 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026C7A44EF03D7-5B42D590312: no probability
+2026-06-24 07:10:00,841 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S202682BCAA36EE5-A19BFC76804: no probability
+2026-06-24 07:10:00,841 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026DA930EA8EB7-70412D61488: no probability
+2026-06-24 07:10:00,841 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVECROSSCATEGORY-S2026E0415F61B99-8400A6C066A: no probability
+2026-06-24 07:10:00,841 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVECROSSCATEGORY-S20267D75CE367CA-EB852D60137: no probability
+2026-06-24 07:10:00,842 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S202636E590E551C-6E58C8D19BB: no probability
+2026-06-24 07:10:00,842 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026DC55C9E00AB-96D637AB86F: no probability
+2026-06-24 07:10:00,842 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVECROSSCATEGORY-S2026EDD49233E71-E4065C987B4: no probability
+2026-06-24 07:10:00,842 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVECROSSCATEGORY-S20262BC76651E05-6D05FED9020: no probability
+2026-06-24 07:10:00,842 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S20261EFB6A67FD5-17EC6FEBA97: no probability
+2026-06-24 07:10:00,842 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026A4ADEF8F0C6-DA28C6ACEE5: no probability
+2026-06-24 07:10:00,842 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026E358A00BBF4-E35CF649ECF: no probability
+2026-06-24 07:10:00,842 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S202611E450BB279-734FEFB1948: no probability
+2026-06-24 07:10:00,842 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S20263B4130595E3-1629C873E01: no probability
+2026-06-24 07:10:00,842 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S20269B7CEAF558D-E4BF6CEF51B: no probability
+2026-06-24 07:10:00,842 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026F4FE6B91C14-6B8031921F7: no probability
+2026-06-24 07:10:00,842 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S20261FF68824094-A38A7E0246F: no probability
+2026-06-24 07:10:00,842 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVECROSSCATEGORY-S20260D9F6F6065F-D6C88CC6368: no probability
+2026-06-24 07:10:00,842 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026850718844C9-8F5BDB0C004: no probability
+2026-06-24 07:10:00,842 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S20269AE9D9392F5-B9480788B68: no probability
+2026-06-24 07:10:00,842 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S202624B3346F51E-87FEEAEF670: no probability
+2026-06-24 07:10:00,843 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVECROSSCATEGORY-S202691DCFDB9847-02BC137E26F: no probability
+2026-06-24 07:10:00,843 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026B2BFFA89D6F-2A90BDFECA9: no probability
+2026-06-24 07:10:00,843 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026B611858A1C6-EABE4338AA3: no probability
+2026-06-24 07:10:00,843 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026123B0AFDB25-97E14F88114: no probability
+2026-06-24 07:10:00,843 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S202695B612CF2EA-27F06B52AE7: no probability
+2026-06-24 07:10:00,844 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026FE31A81130E-AC63E0A5237: no probability
+2026-06-24 07:10:00,844 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026F2C3E91E34E-D73B6789010: no probability
+2026-06-24 07:10:00,844 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVECROSSCATEGORY-S20261087EBAC271-A741C82FA2D: no probability
+2026-06-24 07:10:00,844 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026D73C5345210-2F5126A395B: no probability
+2026-06-24 07:10:00,844 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S202690A78C97D3B-814BCEFDF2F: no probability
+2026-06-24 07:10:00,844 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVECROSSCATEGORY-S20263BEA79BC583-1D80E1AF5A4: no probability
+2026-06-24 07:10:00,844 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S202669D33A262D2-4F818988D83: no probability
+2026-06-24 07:10:00,844 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026343ECBB370F-9699BFEDA97: no probability
+2026-06-24 07:10:00,844 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVECROSSCATEGORY-S2026F5ECA50AE83-A24A70C6A21: no probability
+2026-06-24 07:10:00,844 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVECROSSCATEGORY-S2026E345AB982A0-C3CB6005F71: no probability
+2026-06-24 07:10:00,844 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVECROSSCATEGORY-S20268D728FE35CE-6741164A489: no probability
+2026-06-24 07:10:00,844 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026BB874B93375-AC23F238230: no probability
+2026-06-24 07:10:00,844 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S202682BCAA36EE5-E63F4B2B508: no probability
+2026-06-24 07:10:00,845 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026BA0881D20C9-07F66EAB0B7: no probability
+2026-06-24 07:10:00,845 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S20264F0FB6603E5-E5C0CC3F33F: no probability
+2026-06-24 07:10:00,845 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026729D8837C51-B9C6F05D1BD: no probability
+2026-06-24 07:10:00,845 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026929B90A1BE8-88246EBA0A9: no probability
+2026-06-24 07:10:00,845 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S202651C30699E12-A4AABC2E100: no probability
+2026-06-24 07:10:00,845 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S20260EEE4AA954A-C2A88C8A81E: no probability
+2026-06-24 07:10:00,845 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S20265F7971F78AC-AA3067C939E: no probability
+2026-06-24 07:10:00,845 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026A4C43172ECC-6BF49AD92F5: no probability
+2026-06-24 07:10:00,845 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026DEC3273929E-883E810B300: no probability
+2026-06-24 07:10:00,845 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S20267E106AB62FE-4102257350A: no probability
+2026-06-24 07:10:00,845 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVECROSSCATEGORY-S20267334000933D-67042DF84A2: no probability
+2026-06-24 07:10:00,846 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S202657EF82E7881-9730115097D: no probability
+2026-06-24 07:10:00,846 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S20262640EBC838C-42ED00F137A: no probability
+2026-06-24 07:10:00,846 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S20261DB280A7B05-66D449A8580: no probability
+2026-06-24 07:10:00,846 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S20262D530E1DAF3-775E65EC693: no probability
+2026-06-24 07:10:00,846 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S20268EED6B46350-086B2295FD8: no probability
+2026-06-24 07:10:00,846 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S20266A8B9F52F66-D81BA388875: no probability
+2026-06-24 07:10:00,846 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026DB14CA49EC9-4F95F779C2D: no probability
+2026-06-24 07:10:00,846 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026982E9F5AD10-B845C499CAE: no probability
+2026-06-24 07:10:00,846 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S20268E2DA1236C0-51F9FDFA9E0: no probability
+2026-06-24 07:10:00,846 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S202667AB3301FCD-B2E21529FDB: no probability
+2026-06-24 07:10:00,846 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S20268140E44A3DA-729EE8BFB6C: no probability
+2026-06-24 07:10:00,846 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026CA9810F9CD3-1E0B7BFB2A5: no probability
+2026-06-24 07:10:00,847 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S20266234EC52897-AA6BC3ED4AB: no probability
+2026-06-24 07:10:00,847 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S202627EB1753AD8-D60F0F99281: no probability
+2026-06-24 07:10:00,847 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVECROSSCATEGORY-S202621531FC56E8-06524A759A9: no probability
+2026-06-24 07:10:00,847 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVECROSSCATEGORY-S20263955622288D-32F581383DF: no probability
+2026-06-24 07:10:00,847 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S202601E8C7FBD53-3F727A88F7E: no probability
+2026-06-24 07:10:00,847 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026837B315F474-6EC5F0B7F27: no probability
+2026-06-24 07:10:00,847 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S20263285139DEAE-7D57DE2419F: no probability
+2026-06-24 07:10:00,847 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026CE4A07DB917-6AF42FC7684: no probability
+2026-06-24 07:10:00,847 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S20260AE4AB6A690-C3DF6C2626D: no probability
+2026-06-24 07:10:00,847 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVECROSSCATEGORY-S202649B7117BED2-36C6192F450: no probability
+2026-06-24 07:10:00,847 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026D55D047E792-C254C51E078: no probability
+2026-06-24 07:10:00,847 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVECROSSCATEGORY-S20267334000933D-04693314F65: no probability
+2026-06-24 07:10:00,847 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S202628690084ACE-C3A08CC5121: no probability
+2026-06-24 07:10:00,848 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVECROSSCATEGORY-S2026B6735CF0433-73EEC71FB08: no probability
+2026-06-24 07:10:00,848 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026BF1472978F6-C2F9CE664A4: no probability
+2026-06-24 07:10:00,848 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026EA0DB71F918-F555FBBB042: no probability
+2026-06-24 07:10:00,848 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026B2BFFA89D6F-0D4A0DF7C50: no probability
+2026-06-24 07:10:00,848 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S20263D4247C41E2-5A574429624: no probability
+2026-06-24 07:10:00,848 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026C8A6FB237B7-ABD1F3182CD: no probability
+2026-06-24 07:10:00,848 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026D7B8A50F42F-25CDB7AB7B7: no probability
+2026-06-24 07:10:00,848 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVESPORTSMULTIGAMEEXTENDED-S2026B7AA8DF4EB6-2912B0EEC24: no probability
+2026-06-24 07:10:00,848 WARNING prediction_market_engine.normalization.canonical_market: Skipping kalshi market KXMVECROSSCATEGORY-S2026B75A50BC708-72036CE96F8: no probability
+2026-06-24 07:10:00,935 INFO httpx: HTTP Request: GET https://gamma-api.polymarket.com/markets?active=true&limit=100 "HTTP/1.1 200 OK"
+2026-06-24 07:10:01,001 INFO prediction_market_engine.normalization.matcher: Matched 0 cross-venue pairs from 102 markets
+2026-06-24 07:10:01,011 INFO prediction_market_engine.engine: Poll complete: 102 markets, 0 pairs, 0 opportunities
+2026-06-24 07:10:01,011 INFO apscheduler.executors.default: Job "PredictionMarketEngine.poll (trigger: interval[0:05:00], next run at: 2026-06-24 07:15:00 EDT)" executed successfully
