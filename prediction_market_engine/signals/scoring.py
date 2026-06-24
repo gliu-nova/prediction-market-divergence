@@ -19,7 +19,8 @@ class SignalScorer:
         max_historical_gap: float | None = None,
         observed_at: datetime | None = None,
     ) -> int:
-        diff_score = min(100.0, (difference_pct_points / 20.0) * 100.0)
+        # 15pp gap = full magnitude score (explainable reference for traders)
+        diff_score = min(100.0, (difference_pct_points / 15.0) * 100.0)
 
         vol_a = market_a.volume or 0
         vol_b = market_b.volume or 0
@@ -35,7 +36,7 @@ class SignalScorer:
         if max_historical_gap is not None and difference_pct_points > max_historical_gap:
             rarity_score = min(100.0, 60.0 + (difference_pct_points - max_historical_gap) * 3.0)
         elif max_historical_gap is None:
-            rarity_score = 50.0
+            rarity_score = 65.0  # first cross-venue observation — novel baseline
         else:
             rarity_score = max(10.0, 40.0 - (max_historical_gap - difference_pct_points) * 2.0)
 

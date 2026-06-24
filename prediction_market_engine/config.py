@@ -61,8 +61,14 @@ def _apply_env_overrides(config: AppConfig) -> AppConfig:
         config.service.host = host
     if port := os.getenv("PMD_PORT"):
         config.service.port = int(port)
+    if poll := os.getenv("PMD_POLL_INTERVAL_SECONDS"):
+        config.service.poll_interval_seconds = int(poll)
     if use_mock := os.getenv("PMD_USE_MOCK"):
         config.sources.use_mock = use_mock.lower() in ("1", "true", "yes")
+    if min_div := os.getenv("PMD_MIN_DIVERGENCE_PCT_POINTS"):
+        config.detection.min_divergence_pct_points = float(min_div)
+    if min_vol := os.getenv("PMD_MIN_VOLUME"):
+        config.detection.min_volume = float(min_vol)
     return config
 
 

@@ -23,8 +23,14 @@ def main() -> None:
         config.service.port = args.port
 
     if args.poll_once:
+        import logging
+
         from prediction_market_engine.engine import PredictionMarketEngine
 
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        )
         engine = PredictionMarketEngine(config)
         count = engine.poll()
         print(f"Poll complete: {count} opportunities found")
