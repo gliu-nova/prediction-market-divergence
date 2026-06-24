@@ -1,5 +1,6 @@
 export interface Env {
   DB: D1Database;
+  ASSETS: Fetcher;
   ENVIRONMENT?: string;
   APP_NAME?: string;
   USE_MOCK?: string;
