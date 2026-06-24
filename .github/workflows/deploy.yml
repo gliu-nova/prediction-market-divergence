@@ -3,6 +3,7 @@ name: Deploy to Cloudflare Pages
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -18,11 +19,29 @@ jobs:
 
       - run: npm ci
 
+      - name: Verify Pages deploy artifacts
+        run: |
+          test -d public || (echo "ERROR: public/ is missing" && exit 1)
+          test -f public/index.html || (echo "ERROR: public/index.html is missing" && exit 1)
+          test -d functions || (echo "ERROR: functions/ is missing" && exit 1)
+          test -f wrangler.toml || (echo "ERROR: wrangler.toml is missing" && exit 1)
+          echo "Deploy artifacts OK:"
+          ls -la public
+          ls -la functions
+
+      - name: Ensure Cloudflare Pages project exists
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4.104.0"
+          command: pages project create prediction-market-divergence --production-branch main
+        continue-on-error: true
+
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: "4.104.0"
-          # Pages project (not Workers). --env="" targets top-level wrangler.toml config.
-          command: pages deploy public --project-name=prediction-market-divergence
+          command: pages deploy public --project-name=prediction-market-divergence --branch=main --env=""
