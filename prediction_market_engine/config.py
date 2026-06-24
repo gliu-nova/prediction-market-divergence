@@ -16,6 +16,8 @@ class ServiceConfig(BaseModel):
 
 class StorageConfig(BaseModel):
     db_path: str = "data/prediction_markets.db"
+    opportunity_max_age_hours: int = 24
+    observation_retention_days: int = 30
 
 
 class KalshiSourceConfig(BaseModel):
@@ -69,6 +71,8 @@ def _apply_env_overrides(config: AppConfig) -> AppConfig:
         config.detection.min_divergence_pct_points = float(min_div)
     if min_vol := os.getenv("PMD_MIN_VOLUME"):
         config.detection.min_volume = float(min_vol)
+    if max_age := os.getenv("PMD_OPPORTUNITY_MAX_AGE_HOURS"):
+        config.storage.opportunity_max_age_hours = int(max_age)
     return config
 
 

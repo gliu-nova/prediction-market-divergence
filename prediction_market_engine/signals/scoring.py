@@ -31,7 +31,12 @@ class SignalScorer:
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=timezone.utc)
         age_minutes = (datetime.now(timezone.utc) - ts).total_seconds() / 60.0
-        recency_score = max(0.0, 100.0 - age_minutes * 2.0)
+        # Full recency for fresh detections; gradual decay after 30 min (stable across poll window)
+        if age_minutes <= 30.0:
+            recency_score = 100.0
+        else:
+            age_hours = age_minutes / 60.0
+            recency_score = max(0.0, 100.0 - (age_hours - 0.5) * 15.0)
 
         if max_historical_gap is not None and difference_pct_points > max_historical_gap:
             rarity_score = min(100.0, 60.0 + (difference_pct_points - max_historical_gap) * 3.0)

@@ -36,7 +36,7 @@ def test_detects_fed_divergence(storage):
         SignalScorer(ScoringConfig()),
         storage,
     )
-    signals = detector.detect_cross_venue([pair])
+    signals = detector.detect_cross_venue([pair], poll_ts=pair.market_a.observed_at)
     assert len(signals) == 1
     s = signals[0]
     assert s.difference_pct_points == 13.0
@@ -63,5 +63,5 @@ def test_skips_small_divergence(storage):
         SignalScorer(ScoringConfig()),
         storage,
     )
-    signals = detector.detect_cross_venue([pair])
+    signals = detector.detect_cross_venue([pair], poll_ts=pair.market_a.observed_at)
     assert signals == []

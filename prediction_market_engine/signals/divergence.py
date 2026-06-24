@@ -23,7 +23,11 @@ class DivergenceDetector:
         self.scorer = scorer
         self.storage = storage
 
-    def detect_cross_venue(self, pairs: list[MatchedPair]) -> list[Signal]:
+    def detect_cross_venue(
+        self,
+        pairs: list[MatchedPair],
+        poll_ts: datetime | None = None,
+    ) -> list[Signal]:
         signals: list[Signal] = []
         for pair in pairs:
             diff_pp = abs(pair.market_a.probability - pair.market_b.probability) * 100.0
@@ -41,6 +45,7 @@ class DivergenceDetector:
                 pair.market_a.venue.value,
                 pair.market_b.venue.value,
                 days=self.detection.lookback_days,
+                exclude_since=poll_ts,
             )
             lookback_context = self._lookback_context(diff_pp, max_gap)
             observed_at = max(pair.market_a.observed_at, pair.market_b.observed_at)
@@ -105,9 +110,8 @@ class DivergenceDetector:
         return f"Within {self.detection.lookback_days}-day range (max {max_gap:.1f} pp)"
 
     def _signal_id(self, pair: MatchedPair) -> str:
-        date_str = datetime.now(timezone.utc).strftime("%Y_%m_%d")
         key_slug = pair.match_key.replace(":", "_").replace("-", "_")[:60]
-        return f"kalshi_polymarket_{key_slug}_{date_str}"
+        return f"kalshi_polymarket_{key_slug}"
 
     def _headline(self, topic: str) -> str:
         return f"{topic.upper()} ODDS DIVERGE"

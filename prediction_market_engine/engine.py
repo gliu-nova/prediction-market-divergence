@@ -30,7 +30,11 @@ class EngineState:
 class PredictionMarketEngine:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
-        self.storage = Storage(config.storage.db_path)
+        self.storage = Storage(
+            config.storage.db_path,
+            opportunity_max_age_hours=config.storage.opportunity_max_age_hours,
+            observation_retention_days=config.storage.observation_retention_days,
+        )
         self.kalshi = KalshiSource(config.sources.kalshi, use_mock=config.sources.use_mock)
         self.polymarket = PolymarketSource(config.sources.polymarket, use_mock=config.sources.use_mock)
         self.matcher = MarketMatcher()
@@ -43,12 +47,14 @@ class PredictionMarketEngine:
         """Ingest markets, detect signals, persist. Returns opportunity count."""
         logger.info("Starting poll cycle (mock=%s)", self.config.sources.use_mock)
         try:
-            markets = self._ingest_all()
+            poll_ts = utc_now()
+            markets = self._ingest_all(poll_ts)
             self.state.last_markets_ingested = len(markets)
+            self.storage.prune_observations()
 
             pairs = self.matcher.match_cross_venue(markets)
-            signals = self.divergence.detect_cross_venue(pairs)
-            self.storage.upsert_signals(signals)
+            signals = self.divergence.detect_cross_venue(pairs, poll_ts=poll_ts)
+            self.storage.sync_active_opportunities(signals)
 
             repricing_alerts = self.repricing.detect(markets)
             if repricing_alerts:
@@ -69,22 +75,24 @@ class PredictionMarketEngine:
             logger.exception("Poll cycle failed: %s", exc)
             raise
 
-    def _ingest_all(self) -> list[CanonicalMarket]:
+    def _ingest_all(self, poll_ts: datetime) -> list[CanonicalMarket]:
         markets: list[CanonicalMarket] = []
         observations = []
+        min_interval = max(30, self.config.service.poll_interval_seconds // 2)
         for source in (self.kalshi, self.polymarket):
             raw_list = source.fetch_markets()
             if not raw_list:
                 logger.warning("%s returned no markets", source.name)
                 continue
             for raw in raw_list:
-                canonical = normalize_raw_market(raw)
+                raw["fetched_at"] = poll_ts.isoformat()
+                canonical = normalize_raw_market(raw, observed_at=poll_ts)
                 if canonical is None:
                     continue
                 markets.append(canonical)
                 observations.append(to_observation(canonical))
         if observations:
-            self.storage.save_observations(observations)
+            self.storage.save_observations(observations, min_interval_seconds=min_interval)
         return markets
 
     def health(self) -> HealthStatus:

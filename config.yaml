@@ -5,6 +5,8 @@ service:
 
 storage:
   db_path: "data/prediction_markets.db"
+  opportunity_max_age_hours: 24
+  observation_retention_days: 30
 
 sources:
   use_mock: true
