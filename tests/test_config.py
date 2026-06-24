@@ -16,6 +16,14 @@ def test_env_overrides_poll_and_detection(monkeypatch):
     assert config.sources.use_mock is True
 
 
+def test_env_storage_mode_and_db_path(monkeypatch):
+    monkeypatch.setenv("PMD_STORAGE_MODE", "sqlite")
+    monkeypatch.setenv("PMD_DB_PATH", "/tmp/pmd_test.db")
+    config = _apply_env_overrides(AppConfig())
+    assert config.storage.mode == "sqlite"
+    assert config.storage.db_path == "/tmp/pmd_test.db"
+
+
 def test_env_override_host_port(monkeypatch):
     monkeypatch.setenv("PMD_HOST", "127.0.0.1")
     monkeypatch.setenv("PMD_PORT", "9090")

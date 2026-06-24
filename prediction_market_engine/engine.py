@@ -30,10 +30,13 @@ class EngineState:
 class PredictionMarketEngine:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
+        mode = config.storage.mode if config.storage.mode in ("memory", "sqlite") else "memory"
         self.storage = Storage(
-            config.storage.db_path,
+            db_path=config.storage.db_path,
+            mode=mode,  # type: ignore[arg-type]
             opportunity_max_age_hours=config.storage.opportunity_max_age_hours,
             observation_retention_days=config.storage.observation_retention_days,
+            inactive_signal_retention_days=config.storage.inactive_signal_retention_days,
         )
         self.kalshi = KalshiSource(config.sources.kalshi, use_mock=config.sources.use_mock)
         self.polymarket = PolymarketSource(config.sources.polymarket, use_mock=config.sources.use_mock)

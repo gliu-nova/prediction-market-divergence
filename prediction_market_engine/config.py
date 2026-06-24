@@ -15,9 +15,11 @@ class ServiceConfig(BaseModel):
 
 
 class StorageConfig(BaseModel):
+    mode: str = "memory"  # memory (primary in-RAM) | sqlite (optional persistence)
     db_path: str = "data/prediction_markets.db"
     opportunity_max_age_hours: int = 24
     observation_retention_days: int = 30
+    inactive_signal_retention_days: int = 7
 
 
 class KalshiSourceConfig(BaseModel):
@@ -73,6 +75,10 @@ def _apply_env_overrides(config: AppConfig) -> AppConfig:
         config.detection.min_volume = float(min_vol)
     if max_age := os.getenv("PMD_OPPORTUNITY_MAX_AGE_HOURS"):
         config.storage.opportunity_max_age_hours = int(max_age)
+    if mode := os.getenv("PMD_STORAGE_MODE"):
+        config.storage.mode = mode.lower()
+    if db := os.getenv("PMD_DB_PATH"):
+        config.storage.db_path = db
     return config
 
 

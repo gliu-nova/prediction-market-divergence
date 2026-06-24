@@ -4,9 +4,11 @@ service:
   poll_interval_seconds: 300
 
 storage:
+  mode: memory
   db_path: "data/prediction_markets.db"
   opportunity_max_age_hours: 24
   observation_retention_days: 30
+  inactive_signal_retention_days: 7
 
 sources:
   use_mock: true

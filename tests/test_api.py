@@ -6,7 +6,7 @@ from prediction_market_engine.config import AppConfig
 
 def test_signals_latest_endpoint(tmp_path):
     config = AppConfig(
-        storage={"db_path": str(tmp_path / "api_test.db")},
+        storage={"mode": "memory"},
         sources={"use_mock": True},
         service={"poll_interval_seconds": 3600},
     )
@@ -26,7 +26,7 @@ def test_signals_latest_endpoint(tmp_path):
 
 def test_opportunities_filters(tmp_path):
     config = AppConfig(
-        storage={"db_path": str(tmp_path / "api_test2.db")},
+        storage={"mode": "memory"},
         sources={"use_mock": True},
         service={"poll_interval_seconds": 3600},
     )
@@ -40,7 +40,7 @@ def test_opportunities_filters(tmp_path):
 
 def test_health_endpoint(tmp_path):
     config = AppConfig(
-        storage={"db_path": str(tmp_path / "health.db")},
+        storage={"mode": "memory"},
         sources={"use_mock": True},
         service={"poll_interval_seconds": 3600},
     )

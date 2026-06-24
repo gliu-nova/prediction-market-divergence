@@ -1,5 +1,6 @@
 """Integration tests driving real app + engine paths for /opportunities."""
 
+import pytest
 from fastapi.testclient import TestClient
 
 from prediction_market_engine.app import create_app
@@ -7,9 +8,12 @@ from prediction_market_engine.config import AppConfig
 from prediction_market_engine.engine import PredictionMarketEngine
 
 
-def _app_config(db_path: str) -> AppConfig:
+def _app_config(tmp_path, mode: str = "memory") -> AppConfig:
+    storage: dict = {"mode": mode}
+    if mode == "sqlite":
+        storage["db_path"] = str(tmp_path / "test.db")
     return AppConfig(
-        storage={"db_path": db_path},
+        storage=storage,
         sources={"use_mock": True},
         service={"poll_interval_seconds": 3600},
         detection={"min_divergence_pct_points": 5.0, "min_volume": 1000.0},
@@ -17,7 +21,7 @@ def _app_config(db_path: str) -> AppConfig:
 
 
 def test_fed_divergence_surfaces_via_opportunities(tmp_path):
-    cfg = _app_config(str(tmp_path / "fed.db"))
+    cfg = _app_config(tmp_path)
     engine = PredictionMarketEngine(cfg)
     count = engine.poll()
     assert count >= 1
@@ -43,7 +47,7 @@ def test_fed_divergence_surfaces_via_opportunities(tmp_path):
         }
         assert required.issubset(opp.keys())
         assert opp["difference_pct_points"] == 13.0
-        assert opp["score"] >= 80
+        assert opp["score"] == pytest.approx(87, abs=1)
         assert "disagree by 13 pts" in opp["tweet_hint"]
         assert opp["market_a"]["venue"] in ("Kalshi", "Polymarket")
         assert opp["market_b"]["venue"] in ("Kalshi", "Polymarket")
@@ -54,7 +58,7 @@ def test_fed_divergence_surfaces_via_opportunities(tmp_path):
 
 
 def test_opportunities_filters_exclude_low_score(tmp_path):
-    cfg = _app_config(str(tmp_path / "filter.db"))
+    cfg = _app_config(tmp_path)
     engine = PredictionMarketEngine(cfg)
     engine.poll()
 
@@ -67,7 +71,7 @@ def test_opportunities_filters_exclude_low_score(tmp_path):
 
 
 def test_poll_survives_empty_source(monkeypatch, tmp_path):
-    cfg = _app_config(str(tmp_path / "degraded.db"))
+    cfg = _app_config(tmp_path)
 
     from prediction_market_engine.sources import kalshi
 

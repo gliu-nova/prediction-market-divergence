@@ -7,11 +7,11 @@ from prediction_market_engine.storage import Storage
 @pytest.fixture
 def config(tmp_path):
     return AppConfig(
-        storage={"db_path": str(tmp_path / "test.db")},
+        storage={"mode": "memory"},
         sources={"use_mock": True},
     )
 
 
 @pytest.fixture
 def storage(tmp_path):
-    return Storage(str(tmp_path / "test.db"))
+    return Storage(mode="memory")

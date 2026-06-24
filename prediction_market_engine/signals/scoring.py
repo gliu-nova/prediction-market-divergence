@@ -38,10 +38,13 @@ class SignalScorer:
             age_hours = age_minutes / 60.0
             recency_score = max(0.0, 100.0 - (age_hours - 0.5) * 15.0)
 
-        if max_historical_gap is not None and difference_pct_points > max_historical_gap:
-            rarity_score = min(100.0, 60.0 + (difference_pct_points - max_historical_gap) * 3.0)
-        elif max_historical_gap is None:
-            rarity_score = 65.0  # first cross-venue observation — novel baseline
+        if max_historical_gap is None:
+            rarity_score = 65.0  # no prior cross-venue history
+        elif difference_pct_points >= max_historical_gap:
+            # At or above historical max — still trader-relevant
+            rarity_score = min(
+                100.0, 65.0 + (difference_pct_points - max_historical_gap) * 3.0
+            )
         else:
             rarity_score = max(10.0, 40.0 - (max_historical_gap - difference_pct_points) * 2.0)
 

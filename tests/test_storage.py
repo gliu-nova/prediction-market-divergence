@@ -2,7 +2,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from prediction_market_engine.models import MarketObservation, Signal, SignalType, MarketSide
+from prediction_market_engine.config import AppConfig
+from prediction_market_engine.engine import PredictionMarketEngine
+from prediction_market_engine.models import MarketObservation, MarketSide, Signal, SignalType
 from prediction_market_engine.storage import Storage
 
 
@@ -26,21 +28,53 @@ def _obs(
     )
 
 
-def test_max_historical_gap_aligns_offset_timestamps(tmp_path):
-    storage = Storage(str(tmp_path / "gap.db"))
+def test_memory_mode_is_primary_store():
+    storage = Storage(mode="memory")
+    assert storage.uses_persistence is False
+    assert storage._active_cache == {}
+    obs = _obs("Kalshi", "K1", "fed-rates:test", 0.42, datetime.now(timezone.utc))
+    storage.save_observation(obs)
+    assert storage.count_observations() == 1
+    assert storage.mode == "memory"
+
+
+def test_sqlite_memory_persistent_connection():
+    storage = Storage(db_path=":memory:", mode="sqlite")
+    storage.save_observation(
+        _obs("Kalshi", "K1", "fed-rates:test", 0.42, datetime.now(timezone.utc))
+    )
+    assert storage.count_observations() == 1
+    storage2 = Storage(db_path=":memory:", mode="sqlite")
+    # separate instance = new :memory: db (expected); same instance persists
+    assert storage.count_observations() == 1
+
+
+def test_max_historical_gap_aligns_offset_timestamps():
+    storage = Storage(mode="memory")
     base = datetime(2026, 6, 24, 12, 0, 0, tzinfo=timezone.utc)
+    poll_ts = base + timedelta(minutes=10)
     cid = "fed-rates:fed-cut-sep-2026"
 
     storage.save_observation(_obs("Kalshi", "K1", cid, 0.42, base))
     storage.save_observation(_obs("Polymarket", "P1", cid, 0.55, base + timedelta(seconds=90)))
 
-    gap = storage.max_historical_gap(cid, "Kalshi", "Polymarket", days=30)
-    assert gap is not None
+    gap = storage.max_historical_gap(cid, "Kalshi", "Polymarket", days=30, exclude_since=poll_ts)
     assert gap == pytest.approx(13.0, abs=0.1)
 
 
-def test_observation_dedup_within_interval(tmp_path):
-    storage = Storage(str(tmp_path / "dedup.db"))
+def test_exclude_since_excludes_current_poll_observations():
+    storage = Storage(mode="memory")
+    poll_ts = datetime(2026, 6, 24, 12, 0, 0, tzinfo=timezone.utc)
+    cid = "fed-rates:fed-cut-sep-2026"
+    storage.save_observation(_obs("Kalshi", "K1", cid, 0.42, poll_ts))
+    storage.save_observation(_obs("Polymarket", "P1", cid, 0.55, poll_ts))
+
+    gap = storage.max_historical_gap(cid, "Kalshi", "Polymarket", exclude_since=poll_ts)
+    assert gap is None
+
+
+def test_observation_dedup_within_interval():
+    storage = Storage(mode="memory")
     ts = datetime.now(timezone.utc)
     obs = _obs("Kalshi", "K1", "fed-rates:test", 0.42, ts)
     assert storage.save_observations([obs]) == 1
@@ -49,13 +83,7 @@ def test_observation_dedup_within_interval(tmp_path):
 
 
 def test_stable_signal_id_no_duplicate_on_repoll(tmp_path):
-    from prediction_market_engine.config import AppConfig
-    from prediction_market_engine.engine import PredictionMarketEngine
-
-    cfg = AppConfig(
-        storage={"db_path": str(tmp_path / "repoll.db")},
-        sources={"use_mock": True},
-    )
+    cfg = AppConfig(storage={"mode": "memory"}, sources={"use_mock": True})
     engine = PredictionMarketEngine(cfg)
     engine.poll()
     engine.poll()
@@ -65,8 +93,8 @@ def test_stable_signal_id_no_duplicate_on_repoll(tmp_path):
     assert "2026_06_24" not in opps[0].id
 
 
-def test_deactivate_stale_opportunities(tmp_path):
-    storage = Storage(str(tmp_path / "stale.db"))
+def test_deactivate_stale_opportunities():
+    storage = Storage(mode="memory")
     old = Signal(
         id="kalshi_polymarket_old_market",
         type=SignalType.PREDICTION_MARKET_DIVERGENCE,
@@ -102,9 +130,8 @@ def test_deactivate_stale_opportunities(tmp_path):
     assert active[0].id == new.id
 
 
-def test_in_memory_cache_serves_opportunities(tmp_path):
-    storage = Storage(str(tmp_path / "cache.db"))
-    assert storage._active_cache == {}
+def test_in_memory_cache_serves_opportunities():
+    storage = Storage(mode="memory")
     sig = Signal(
         id="kalshi_polymarket_test",
         type=SignalType.PREDICTION_MARKET_DIVERGENCE,
@@ -124,3 +151,25 @@ def test_in_memory_cache_serves_opportunities(tmp_path):
     assert len(opps) == 1
     assert opps[0].tweet_hint == "hint"
 
+
+def test_sqlite_persistence_roundtrip(tmp_path):
+    db = str(tmp_path / "persist.db")
+    storage = Storage(db_path=db, mode="sqlite")
+    sig = Signal(
+        id="kalshi_polymarket_test",
+        type=SignalType.PREDICTION_MARKET_DIVERGENCE,
+        title="TEST",
+        asset_or_topic="Fed rates",
+        market_a=MarketSide(venue="Kalshi", probability=0.42, url="u", market_id="k", volume=5000),
+        market_b=MarketSide(venue="Polymarket", probability=0.55, url="u", market_id="p", volume=5000),
+        difference_pct_points=13.0,
+        score=87,
+        created_at=datetime.now(timezone.utc),
+        tweet_hint="hint",
+        is_active=True,
+    )
+    storage.sync_active_opportunities([sig])
+
+    reloaded = Storage(db_path=db, mode="sqlite")
+    assert reloaded.get_signal_by_id(sig.id) is not None
+    assert len(reloaded.get_opportunities(min_score=80)) == 1
