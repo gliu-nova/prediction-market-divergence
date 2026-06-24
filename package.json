@@ -2,6 +2,10 @@
   "name": "prediction-market-divergence",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=24.0.0",
+    "npm": ">=11.0.0"
+  },
   "scripts": {
     "dev": "wrangler pages dev public --d1=DB --local",
     "db:local": "wrangler d1 execute prediction-market-divergence --local --file=./migrations/0001_init.sql",
@@ -11,11 +15,11 @@
     "health:local": "curl -s http://localhost:8788/health | jq"
   },
   "dependencies": {
-    "hono": "^4.7.5"
+    "hono": "^4.12.27"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250214.0",
-    "typescript": "^5.8.2",
-    "wrangler": "^4.99.0"
+    "@cloudflare/workers-types": "^4.20260624.1",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.104.0"
   }
 }
