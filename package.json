@@ -7,12 +7,8 @@
     "npm": ">=11.0.0"
   },
   "scripts": {
-    "dev": "wrangler pages dev public --d1=DB --local",
-    "db:local": "wrangler d1 execute prediction-market-divergence --local --file=./migrations/0001_init.sql",
     "db:remote": "wrangler d1 execute prediction-market-divergence --remote --file=./migrations/0001_init.sql",
-    "deploy": "wrangler pages deploy public --project-name=prediction-market-divergence",
-    "poll:local": "curl -s -X POST http://localhost:8788/poll | jq",
-    "health:local": "curl -s http://localhost:8788/health | jq"
+    "deploy": "wrangler pages deploy public --project-name=prediction-market-divergence"
   },
   "dependencies": {
     "hono": "^4.12.27"
