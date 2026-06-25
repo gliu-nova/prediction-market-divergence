@@ -258,6 +258,7 @@ export async function getHealth(
   return {
     status: lastError ? "degraded" : "ok",
     last_poll_at: lastPollAt,
+    last_error: lastError || null,
     markets_tracked: marketsTracked,
     active_opportunities: activeRow?.c ?? 0,
     signals_total: totalRow?.c ?? 0,

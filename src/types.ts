@@ -80,6 +80,7 @@ export interface MatchedPair {
 export interface HealthStatus {
   status: string;
   last_poll_at: string | null;
+  last_error: string | null;
   markets_tracked: number;
   active_opportunities: number;
   signals_total: number;
