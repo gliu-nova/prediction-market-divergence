@@ -5,12 +5,8 @@ import type { Env } from "../src/types";
 export async function onSchedule(
   _controller: ScheduledController,
   env: Env,
-  ctx: ExecutionContext,
+  _ctx: ExecutionContext,
 ): Promise<void> {
-  ctx.waitUntil(
-    (async () => {
-      await ensureTables(env.DB);
-      await runPoll(env);
-    })(),
-  );
+  await ensureTables(env.DB);
+  await runPoll(env);
 }

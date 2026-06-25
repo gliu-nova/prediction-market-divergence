@@ -1,0 +1,24 @@
+name: Scheduled Poll
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger cloud poll
+        env:
+          POLL_SECRET: ${{ secrets.POLL_SECRET }}
+        run: |
+          set -euo pipefail
+          URL="https://prediction-market-divergence.pages.dev/poll"
+          if [ -n "${POLL_SECRET:-}" ]; then
+            curl -sfS -X POST -H "Authorization: Bearer ${POLL_SECRET}" "$URL"
+          else
+            curl -sfS -X POST "$URL"
+          fi
+          echo
+          curl -sfS "https://prediction-market-divergence.pages.dev/health"
