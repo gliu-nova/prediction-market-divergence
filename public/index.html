@@ -13,55 +13,173 @@
       <p class="subtitle">Cross-venue Kalshi ↔ Polymarket signals</p>
     </header>
 
+    <section id="polling" class="card">
+      <div class="row">
+        <h2>Polling</h2>
+        <div class="actions">
+          <button id="refresh" type="button">Refresh</button>
+          <button id="poll-now" type="button" class="secondary">Poll now</button>
+        </div>
+      </div>
+      <div id="polling-body" class="muted">Loading…</div>
+    </section>
+
     <section id="health" class="card">
-      <h2>Status</h2>
+      <h2>Service status</h2>
       <div id="health-body" class="muted">Loading…</div>
     </section>
 
     <section class="card">
       <div class="row">
         <h2>Active opportunities</h2>
-        <button id="refresh">Refresh</button>
+        <label class="filter">
+          Min score
+          <input id="min-score" type="number" min="0" max="100" value="0" />
+        </label>
       </div>
       <div id="opportunities" class="muted">Loading…</div>
     </section>
+
+    <section class="card">
+      <h2>Latest signals</h2>
+      <div id="signals" class="muted">Loading…</div>
+    </section>
   </main>
   <script>
+    function formatRelativeTime(iso) {
+      if (!iso) return 'never';
+      const then = new Date(iso).getTime();
+      if (Number.isNaN(then)) return iso;
+      const minutes = Math.floor((Date.now() - then) / 60000);
+      if (minutes < 1) return 'just now';
+      if (minutes === 1) return '1 minute ago';
+      if (minutes < 60) return `${minutes} minutes ago`;
+      const hours = Math.floor(minutes / 60);
+      if (hours === 1) return '1 hour ago';
+      if (hours < 24) return `${hours} hours ago`;
+      const days = Math.floor(hours / 24);
+      return days === 1 ? '1 day ago' : `${days} days ago`;
+    }
+
+    function pollMinutesAgo(lastPollAt) {
+      if (!lastPollAt) return null;
+      return Math.floor((Date.now() - new Date(lastPollAt).getTime()) / 60000);
+    }
+
+    function pollingBadge(lastPollAt) {
+      const minutes = pollMinutesAgo(lastPollAt);
+      if (minutes === null) {
+        return '<span class="badge badge-bad">Not running</span>';
+      }
+      if (minutes <= 20) {
+        return '<span class="badge badge-ok">Healthy</span>';
+      }
+      return '<span class="badge badge-warn">Delayed</span>';
+    }
+
+    function sourceBadge(label, value) {
+      const ok = value === 'ok';
+      return `<span class="source"><strong>${label}:</strong> <span class="${ok ? 'poll-ok' : 'poll-stale'}">${value || 'unknown'}</span></span>`;
+    }
+
+    function renderSignal(item) {
+      const b = item.market_b;
+      const venueLine = b
+        ? `${item.market_a.venue}: ${(item.market_a.probability * 100).toFixed(0)}% · ${b.venue}: ${(b.probability * 100).toFixed(0)}% · gap ${item.difference_pct_points} pts`
+        : `${item.market_a.venue}: ${(item.market_a.probability * 100).toFixed(0)}%`;
+      return `
+        <article class="opp">
+          <h3>${item.title} <span class="score">score ${item.score}</span></h3>
+          <p>${venueLine}</p>
+          <p class="muted">${item.lookback_context || ''}</p>
+          ${item.tweet_hint ? `<p>→ ${item.tweet_hint}</p>` : ''}
+        </article>
+      `;
+    }
+
+    async function loadPolling() {
+      const res = await fetch('/health');
+      const data = await res.json();
+      const relative = formatRelativeTime(data.last_poll_at);
+      const absolute = data.last_poll_at ? new Date(data.last_poll_at).toLocaleString() : '—';
+      const cadence = 'every 15 minutes (Cloudflare cron)';
+
+      document.getElementById('polling-body').innerHTML = `
+        <div class="polling-grid">
+          <div>${pollingBadge(data.last_poll_at)}</div>
+          <div><strong>Last ran:</strong> ${relative} <span class="poll-ts">(${absolute})</span></div>
+          <div><strong>Schedule:</strong> ${cadence}</div>
+          <div><strong>Expected:</strong> updates within ~20 minutes</div>
+        </div>
+      `;
+    }
+
     async function loadHealth() {
       const res = await fetch('/health');
       const data = await res.json();
       document.getElementById('health-body').innerHTML = `
-        <div><strong>Status:</strong> ${data.status}</div>
-        <div><strong>Last poll:</strong> ${data.last_poll_at || 'never'}</div>
-        <div><strong>Markets tracked:</strong> ${data.markets_tracked}</div>
-        <div><strong>Active opportunities:</strong> ${data.active_opportunities}</div>
-        <div><strong>Mode:</strong> ${data.sources?.mode || 'unknown'} (${data.sources?.runtime || 'local'})</div>
+        <div class="health-grid">
+          <div><strong>Status:</strong> <span class="${data.status === 'ok' ? 'poll-ok' : 'poll-stale'}">${data.status}</span></div>
+          <div><strong>Markets tracked:</strong> ${data.markets_tracked}</div>
+          <div><strong>Active opportunities:</strong> ${data.active_opportunities}</div>
+          <div><strong>Signals total:</strong> ${data.signals_total}</div>
+          <div><strong>Mode:</strong> ${data.sources?.mode || 'unknown'}</div>
+          <div><strong>Runtime:</strong> ${data.sources?.runtime || 'unknown'}</div>
+          <div class="sources">${sourceBadge('Kalshi', data.sources?.kalshi)} ${sourceBadge('Polymarket', data.sources?.polymarket)}</div>
+        </div>
       `;
     }
 
     async function loadOpportunities() {
-      const res = await fetch('/opportunities?min_score=0&limit=20');
+      const minScore = document.getElementById('min-score').value || '0';
+      const res = await fetch(`/opportunities?min_score=${minScore}&limit=20`);
       const data = await res.json();
       const el = document.getElementById('opportunities');
       if (!data.opportunities?.length) {
         el.innerHTML = '<p>No active opportunities above threshold.</p>';
         return;
       }
-      el.innerHTML = data.opportunities.map((o) => `
-        <article class="opp">
-          <h3>${o.title} <span class="score">score ${o.score}</span></h3>
-          <p>${o.market_a.venue}: ${(o.market_a.probability * 100).toFixed(0)}% · ${o.market_b.venue}: ${(o.market_b.probability * 100).toFixed(0)}% · gap ${o.difference_pct_points} pts</p>
-          <p class="muted">${o.lookback_context}</p>
-          <p>→ ${o.tweet_hint}</p>
-        </article>
-      `).join('');
+      el.innerHTML = data.opportunities.map(renderSignal).join('');
+    }
+
+    async function loadSignals() {
+      const res = await fetch('/signals/latest?limit=10');
+      const data = await res.json();
+      const el = document.getElementById('signals');
+      if (!data.signals?.length) {
+        el.innerHTML = '<p>No signals recorded yet.</p>';
+        return;
+      }
+      el.innerHTML = data.signals.map(renderSignal).join('');
+    }
+
+    async function pollNow() {
+      const btn = document.getElementById('poll-now');
+      btn.disabled = true;
+      btn.textContent = 'Polling…';
+      try {
+        const res = await fetch('/poll', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) {
+          alert(data.detail || 'Poll failed');
+          return;
+        }
+        await refresh();
+      } catch (err) {
+        alert('Poll failed');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Poll now';
+      }
     }
 
     async function refresh() {
-      await Promise.all([loadHealth(), loadOpportunities()]);
+      await Promise.all([loadPolling(), loadHealth(), loadOpportunities(), loadSignals()]);
     }
 
     document.getElementById('refresh').addEventListener('click', refresh);
+    document.getElementById('poll-now').addEventListener('click', pollNow);
+    document.getElementById('min-score').addEventListener('change', loadOpportunities);
     refresh();
     setInterval(refresh, 60000);
   </script>
