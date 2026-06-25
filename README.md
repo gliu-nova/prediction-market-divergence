@@ -94,9 +94,13 @@ Token needs **Cloudflare Pages Edit** + **D1 Edit**.
 
 ### 5. Cron trigger
 
-After deploy, confirm **Workers & Pages → your project → Settings → Cron Triggers** shows `*/15 * * * *`.
+Pages does not support `[triggers]` in `wrangler.toml` (that is Workers-only). Set the schedule in the dashboard:
 
-Configured in `wrangler.toml` `[triggers]` section. Redeploy if the dashboard shows the old schedule.
+1. **Workers & Pages** → `prediction-market-divergence` → **Settings** → **Cron Triggers**
+2. Add or edit: `*/15 * * * *` (every 15 minutes UTC)
+3. Handler: `functions/_scheduled.ts` (`onSchedule`)
+
+After deploy, confirm the dashboard shows `*/15 * * * *`.
 
 ### 6. Deploy
 
@@ -197,7 +201,7 @@ functions/
   _scheduled.ts             # Cron poll handler (every 15 min)
 public/                     # Dashboard static files
 migrations/                 # D1 schema
-wrangler.toml               # Cloudflare config + cron
+wrangler.toml               # Cloudflare Pages config (D1, vars; cron via dashboard)
 .github/workflows/deploy.yml
 scripts/deploy.sh
 ```

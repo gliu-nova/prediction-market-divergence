@@ -22,8 +22,8 @@ OBSERVATION_RETENTION_DAYS = "30"
 ENVIRONMENT = "preview"
 USE_MOCK = "true"
 
-[triggers]
-crons = ["*/15 * * * *"]
+# Cron schedule for functions/_scheduled.ts is set in the Cloudflare dashboard
+# (Workers & Pages → project → Settings → Cron Triggers), not in wrangler.toml.
 
 # Secrets (set in dashboard or via wrangler pages secret put):
 #   POLL_SECRET — optional bearer token for POST /poll
