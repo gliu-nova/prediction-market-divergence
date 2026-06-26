@@ -1,5 +1,7 @@
 export const KALSHI_BASE_URL = "https://api.elections.kalshi.com/trade-api/v2";
 export const KALSHI_MARKETS_PAGE_LIMIT = 1000;
+/** Stay under Cloudflare Workers free-tier external subrequest limit (50), leaving room for Polymarket. */
+export const KALSHI_MAX_PAGES = 40;
 export const KALSHI_PAGE_THROTTLE_MS = 200;
 export const KALSHI_MAX_RETRIES = 5;
 export const KALSHI_RETRY_BASE_MS = 500;
@@ -34,6 +36,7 @@ export interface KalshiFetchOptions {
   fetchFn?: FetchLike;
   pageThrottleMs?: number;
   maxRetries?: number;
+  maxPages?: number;
 }
 
 export function isMveParlayMarket(raw: Record<string, unknown>): boolean {
@@ -117,6 +120,7 @@ export async function fetchKalshiMarketsPage(
 
 export async function fetchKalshiMarketsPages(options: KalshiFetchOptions = {}): Promise<KalshiIngestPage[]> {
   const pageThrottleMs = options.pageThrottleMs ?? KALSHI_PAGE_THROTTLE_MS;
+  const maxPages = options.maxPages ?? KALSHI_MAX_PAGES;
   const pages: KalshiIngestPage[] = [];
   let requestCursor: string | null = null;
   let pageIndex = 0;
@@ -130,7 +134,7 @@ export async function fetchKalshiMarketsPages(options: KalshiFetchOptions = {}):
       marketCount: page.markets.length,
       payload: page.raw,
     });
-    if (!page.cursor) break;
+    if (!page.cursor || pages.length >= maxPages) break;
     requestCursor = page.cursor;
     pageIndex += 1;
     if (pageThrottleMs > 0) await sleep(pageThrottleMs);

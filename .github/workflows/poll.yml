@@ -21,4 +21,21 @@ jobs:
             curl -sfS -X POST "$URL"
           fi
           echo
-          curl -sfS "https://prediction-market-divergence.pages.dev/health"
+
+          HEALTH_URL="https://prediction-market-divergence.pages.dev/health"
+          HEALTH_HTTP=$(curl -sS -o /tmp/pmd-health.json -w "%{http_code}" "$HEALTH_URL")
+          echo "Health HTTP: $HEALTH_HTTP"
+          cat /tmp/pmd-health.json
+          echo
+
+          if [ "$HEALTH_HTTP" != "200" ]; then
+            echo "ERROR: /health returned HTTP $HEALTH_HTTP"
+            exit 1
+          fi
+
+          STATUS=$(jq -r '.status // "unknown"' /tmp/pmd-health.json)
+          LAST_ERROR=$(jq -r '.last_error // empty' /tmp/pmd-health.json)
+          echo "Health status: $STATUS"
+          if [ -n "$LAST_ERROR" ] && [ "$LAST_ERROR" != "null" ]; then
+            echo "Warning: last_poll_error=$LAST_ERROR"
+          fi

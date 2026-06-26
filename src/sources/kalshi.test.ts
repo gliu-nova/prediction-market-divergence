@@ -8,6 +8,7 @@ import {
   filterMveParlayMarkets,
   isMveParlayMarket,
   KALSHI_MARKETS_PAGE_LIMIT,
+  KALSHI_MAX_PAGES,
   type FetchLike,
 } from "./kalshi.ts";
 
@@ -131,6 +132,23 @@ describe("fetchKalshiMarketsPages", () => {
     const pages = await fetchKalshiMarketsPages({ fetchFn, pageThrottleMs: 0 });
     assert.equal(pages.length, 1);
     assert.equal(urls.length, 1);
+  });
+
+  it("stops at maxPages even when more pages are available", async () => {
+    const { fetchFn, urls } = createPaginatedFetch([
+      { markets: [market("P1")], cursor: "page-2" },
+      { markets: [market("P2")], cursor: "page-3" },
+      { markets: [market("P3")], cursor: "page-4" },
+    ]);
+
+    const pages = await fetchKalshiMarketsPages({ fetchFn, pageThrottleMs: 0, maxPages: 2 });
+    assert.equal(pages.length, 2);
+    assert.equal(urls.length, 2);
+    assert.equal(pages[1]?.responseCursor, "page-3");
+  });
+
+  it("defaults maxPages to KALSHI_MAX_PAGES", () => {
+    assert.equal(KALSHI_MAX_PAGES, 40);
   });
 
   it("waits between pages when pageThrottleMs is set", async () => {
