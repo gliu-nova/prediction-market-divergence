@@ -16,10 +16,12 @@ jobs:
           set -euo pipefail
           URL="https://prediction-market-divergence.pages.dev/poll"
           if [ -n "${POLL_SECRET:-}" ]; then
-            curl -sfS -X POST -H "Authorization: Bearer ${POLL_SECRET}" "$URL"
+            POLL_HTTP=$(curl -sS -o /tmp/pmd-poll.json -w "%{http_code}" -X POST -H "Authorization: Bearer ${POLL_SECRET}" "$URL")
           else
-            curl -sfS -X POST "$URL"
+            POLL_HTTP=$(curl -sS -o /tmp/pmd-poll.json -w "%{http_code}" -X POST "$URL")
           fi
+          echo "Poll HTTP: $POLL_HTTP"
+          cat /tmp/pmd-poll.json
           echo
 
           HEALTH_URL="https://prediction-market-divergence.pages.dev/health"
@@ -28,14 +30,19 @@ jobs:
           cat /tmp/pmd-health.json
           echo
 
-          if [ "$HEALTH_HTTP" != "200" ]; then
-            echo "ERROR: /health returned HTTP $HEALTH_HTTP"
-            exit 1
-          fi
-
           STATUS=$(jq -r '.status // "unknown"' /tmp/pmd-health.json)
           LAST_ERROR=$(jq -r '.last_error // empty' /tmp/pmd-health.json)
           echo "Health status: $STATUS"
           if [ -n "$LAST_ERROR" ] && [ "$LAST_ERROR" != "null" ]; then
             echo "Warning: last_poll_error=$LAST_ERROR"
+          fi
+
+          if [ "$POLL_HTTP" != "200" ]; then
+            echo "ERROR: POST /poll returned HTTP $POLL_HTTP"
+            exit 1
+          fi
+
+          if [ "$HEALTH_HTTP" != "200" ]; then
+            echo "ERROR: /health returned HTTP $HEALTH_HTTP"
+            exit 1
           fi

@@ -61,20 +61,31 @@
       return days === 1 ? '1 day ago' : `${days} days ago`;
     }
 
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
     function pollMinutesAgo(lastPollAt) {
       if (!lastPollAt) return null;
       return Math.floor((Date.now() - new Date(lastPollAt).getTime()) / 60000);
     }
 
-    function pollingBadge(lastPollAt) {
-      const minutes = pollMinutesAgo(lastPollAt);
+    function pollingBadge(data) {
+      const minutes = pollMinutesAgo(data.last_poll_at);
       if (minutes === null) {
         return '<span class="badge badge-bad">Not running</span>';
       }
-      if (minutes <= 20) {
-        return '<span class="badge badge-ok">Healthy</span>';
+      if (data.status !== 'ok' || data.last_error) {
+        return '<span class="badge badge-bad">Degraded</span>';
       }
-      return '<span class="badge badge-warn">Delayed</span>';
+      if (minutes > 20) {
+        return '<span class="badge badge-warn">Delayed</span>';
+      }
+      return '<span class="badge badge-ok">Healthy</span>';
     }
 
     function sourceBadge(label, value) {
@@ -97,29 +108,30 @@
       `;
     }
 
-    async function loadPolling() {
-      const res = await fetch('/health');
-      const data = await res.json();
+    function renderPolling(data) {
       const relative = formatRelativeTime(data.last_poll_at);
       const absolute = data.last_poll_at ? new Date(data.last_poll_at).toLocaleString() : '—';
-      const cadence = 'every 15 minutes (Cloudflare cron)';
+      const cadence = 'every 15 minutes (GitHub Actions)';
 
       document.getElementById('polling-body').innerHTML = `
         <div class="polling-grid">
-          <div>${pollingBadge(data.last_poll_at)}</div>
+          <div>${pollingBadge(data)}</div>
           <div><strong>Last ran:</strong> ${relative} <span class="poll-ts">(${absolute})</span></div>
           <div><strong>Schedule:</strong> ${cadence}</div>
-          <div><strong>Expected:</strong> updates within ~20 minutes</div>
+          <div><strong>Expected:</strong> updates within ~20 minutes when polls succeed</div>
         </div>
       `;
     }
 
-    async function loadHealth() {
-      const res = await fetch('/health');
-      const data = await res.json();
+    function renderHealth(data) {
+      const errorLine = data.last_error
+        ? `<div class="poll-error"><strong>Last error:</strong> ${escapeHtml(data.last_error)}</div>`
+        : '';
+
       document.getElementById('health-body').innerHTML = `
         <div class="health-grid">
           <div><strong>Status:</strong> <span class="${data.status === 'ok' ? 'poll-ok' : 'poll-stale'}">${data.status}</span></div>
+          ${errorLine}
           <div><strong>Markets tracked:</strong> ${data.markets_tracked}</div>
           <div><strong>Active opportunities:</strong> ${data.active_opportunities}</div>
           <div><strong>Signals total:</strong> ${data.signals_total}</div>
@@ -128,6 +140,13 @@
           <div class="sources">${sourceBadge('Kalshi', data.sources?.kalshi)} ${sourceBadge('Polymarket', data.sources?.polymarket)}</div>
         </div>
       `;
+    }
+
+    async function loadHealthPanels() {
+      const res = await fetch('/health');
+      const data = await res.json();
+      renderPolling(data);
+      renderHealth(data);
     }
 
     async function loadOpportunities() {
@@ -174,7 +193,7 @@
     }
 
     async function refresh() {
-      await Promise.all([loadPolling(), loadHealth(), loadOpportunities(), loadSignals()]);
+      await Promise.all([loadHealthPanels(), loadOpportunities(), loadSignals()]);
     }
 
     document.getElementById('refresh').addEventListener('click', refresh);

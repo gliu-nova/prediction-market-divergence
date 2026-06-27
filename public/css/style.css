@@ -85,3 +85,4 @@ button:disabled { opacity: 0.6; cursor: wait; }
   font-size: 0.9rem;
   font-weight: 600;
 }
+.poll-error { color: #f87171; }

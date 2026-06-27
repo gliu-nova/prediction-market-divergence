@@ -1,7 +1,7 @@
 # AGENTS.md - Grok Build Instructions
 
 ## Project Overview
-Cloudflare Pages service (TypeScript + D1) that ingests prediction market data (Polymarket, Kalshi), normalizes and matches markets across venues, detects divergences and pricing inefficiencies, stores historical observations in D1, and exposes ranked signals via Hono for the `twitter-bot` project to poll and tweet. Cron polls every 15 minutes. Deploy: GitHub Actions → `wrangler pages deploy`.
+Cloudflare Pages service (TypeScript + D1) that ingests prediction market data (Polymarket, Kalshi), normalizes and matches markets across venues, detects divergences and pricing inefficiencies, stores historical observations in D1, and exposes ranked signals via Hono for the `twitter-bot` project to poll and tweet. Scheduled polling every 15 minutes via GitHub Actions (`.github/workflows/poll.yml` → `POST /poll`). Deploy: GitHub Actions → `wrangler pages deploy`.
 
 ## Signal Output Format
 Signals must be structured JSON that `twitter-bot` can turn into scannable tweets. Include: title, venue prices, difference, score, URLs, tweet_hint, timestamps.

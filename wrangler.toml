@@ -22,9 +22,9 @@ OBSERVATION_RETENTION_DAYS = "30"
 ENVIRONMENT = "preview"
 USE_MOCK = "true"
 
-# Cron for functions/_scheduled.ts must be set on the Pages project in the dashboard
-# (Workers & Pages → prediction-market-divergence → Settings → Cron Triggers).
-# Do NOT attach cron to the separate standalone Worker with the same name.
+# Scheduled polling runs via GitHub Actions (.github/workflows/poll.yml), not Cloudflare
+# cron. Pages does not support Cron Triggers; do not create a separate Worker with this
+# name unless you intentionally migrate polling to Workers.
 
 # Secrets (set in dashboard or via wrangler pages secret put):
 #   POLL_SECRET — optional bearer token for POST /poll

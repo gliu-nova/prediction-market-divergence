@@ -91,8 +91,13 @@ app.post("/poll", async (c) => {
     const auth = c.req.header("Authorization") ?? "";
     if (auth !== `Bearer ${secret}`) return c.json({ detail: "Unauthorized" }, 401);
   }
-  const result = await runPoll(c.env);
-  return c.json({ opportunities_found: result.opportunities, status: "ok", ...result });
+  try {
+    const result = await runPoll(c.env);
+    return c.json({ opportunities_found: result.opportunities, status: "ok", ...result });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return c.json({ status: "error", detail }, 500);
+  }
 });
 
 export default app;

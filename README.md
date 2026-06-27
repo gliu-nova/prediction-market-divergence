@@ -6,18 +6,19 @@ Cross-venue prediction market signal engine (Kalshi ↔ Polymarket). Detects pro
 
 | Component | Technology |
 |-----------|------------|
-| Runtime | Cloudflare Pages Functions + Cron |
+| Runtime | Cloudflare Pages Functions |
 | API | Hono (`src/index.ts`, `functions/`) |
 | Database | Cloudflare D1 (SQLite) |
 | Deploy | GitHub Actions → `wrangler pages deploy` |
-| Polling | Cron every 15 min (`functions/_scheduled.ts`) |
+| Polling | GitHub Actions every 15 min (`.github/workflows/poll.yml` → `POST /poll`) |
 
 ```
 GitHub (main push)
     → GitHub Actions deploy
         → Cloudflare Pages (public API + dashboard)
-            → Cron */15 * * * * → poll Kalshi/Polymarket
             → D1 (observations + signals + poll_state)
+GitHub Actions (*/15 * * * *)
+    → POST /poll → ingest Kalshi/Polymarket → D1
 twitter-bot
     → GET https://prediction-market-divergence.pages.dev/opportunities
 ```
@@ -79,7 +80,7 @@ Pages project → **Settings** → **Bindings**:
 npx wrangler pages secret put POLL_SECRET --project-name=prediction-market-divergence
 ```
 
-Protects `POST /poll`. Cron polls do not need this.
+Protects `POST /poll`. If set, also add the same value as `POLL_SECRET` in GitHub Actions secrets (see step 5).
 
 ### 4. GitHub Actions secrets
 
@@ -89,18 +90,19 @@ Repo → **Settings → Secrets and variables → Actions**:
 |--------|-----------------|
 | `CLOUDFLARE_API_TOKEN` | Cloudflare → My Profile → API Tokens → Edit Cloudflare Workers template |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare dashboard URL or Workers overview |
+| `POLL_SECRET` | Same value as the Pages secret (only if you set `POLL_SECRET` on Pages) |
 
 Token needs **Cloudflare Pages Edit** + **D1 Edit**.
 
-### 5. Cron trigger
+### 5. Scheduled polling (GitHub Actions)
 
-Pages does not support `[triggers]` in `wrangler.toml` (that is Workers-only). Set the schedule in the dashboard:
+Cloudflare **Pages does not support Cron Triggers**. Polling is handled by `.github/workflows/poll.yml`, which runs every 15 minutes and calls `POST /poll` on your deployed Pages URL.
 
-1. **Workers & Pages** → `prediction-market-divergence` → **Settings** → **Cron Triggers**
-2. Add or edit: `*/15 * * * *` (every 15 minutes UTC)
-3. Handler: `functions/_scheduled.ts` (`onSchedule`)
+1. Confirm the workflow exists: **GitHub → Actions → Scheduled Poll**
+2. After the first scheduled run, verify `last_poll_at` advances on `/health`
+3. Manual trigger: **Actions → Scheduled Poll → Run workflow**
 
-After deploy, confirm the dashboard shows `*/15 * * * *`.
+If you see **"Failed to find worker prediction-market-divergence"** in the Cloudflare dashboard, ignore it — this project is a **Pages** app, not a Worker. You do not need to create or regenerate a Worker unless you intentionally migrate polling to Workers cron.
 
 ### 6. Deploy
 
@@ -184,11 +186,11 @@ twitter-bot polls `/opportunities` on each scheduled run (`prediction_markets.en
 | Service | Free tier (approx.) | This project's usage |
 |---------|---------------------|----------------------|
 | Cloudflare Pages | 500 builds/month, unlimited requests | 1 deploy per push; API reads low |
-| Cloudflare Workers (Functions) | 100k requests/day | Cron 96/day + API traffic |
-| Cloudflare D1 | 5M rows read/day, 100k writes/day | ~6 markets/poll × 96 ≈ 576 obs/day |
-| GitHub Actions | 2000 min/month (private) | Deploy-only (~1 min/deploy) |
+| Cloudflare Pages Functions | 100k requests/day | ~96 poll POSTs/day + API traffic |
+| Cloudflare D1 | 5M rows read/day, 100k writes/day | Poll writes scale with market count |
+| GitHub Actions | 2000 min/month (private repos) | Deploy + scheduled poll (~1 min each) |
 
-Cron + D1 should stay **$0/month** at this scale.
+Polling + D1 should stay **$0/month** at this scale.
 
 ---
 
@@ -197,11 +199,12 @@ Cron + D1 should stay **$0/month** at this scale.
 ```
 src/                        # TypeScript cloud engine
 functions/
-  [[path]].ts               # Pages API handler
-  _scheduled.ts             # Cron poll handler (every 15 min)
+  [[path]].ts               # Pages API handler (routes to Hono app)
 public/                     # Dashboard static files
 migrations/                 # D1 schema
-wrangler.toml               # Cloudflare Pages config (D1, vars; cron via dashboard)
-.github/workflows/deploy.yml
+wrangler.toml               # Cloudflare Pages config (D1, vars)
+.github/workflows/
+  deploy.yml                # Deploy on push to main
+  poll.yml                  # Scheduled poll every 15 min
 scripts/deploy.sh
 ```
