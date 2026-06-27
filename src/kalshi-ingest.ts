@@ -1,11 +1,19 @@
 import type { CanonicalMarket } from "./types";
 import type { KalshiIngestPage } from "./sources/kalshi";
 
+const D1_BATCH_CHUNK_SIZE = 200;
+
 export interface KalshiIngestBatch {
   pollTs: string;
   pageCount: number;
   rawMarketCount: number;
   normalizedCount: number;
+}
+
+async function runStatementBatches(db: D1Database, statements: D1PreparedStatement[]): Promise<void> {
+  for (let i = 0; i < statements.length; i += D1_BATCH_CHUNK_SIZE) {
+    await db.batch(statements.slice(i, i + D1_BATCH_CHUNK_SIZE));
+  }
 }
 
 export async function saveKalshiIngest(
@@ -35,29 +43,8 @@ export async function saveKalshiIngest(
            created_at = excluded.created_at`,
       )
       .bind(pollTs, batch.pageCount, batch.rawMarketCount, batch.normalizedCount, createdAt),
-    db.prepare("DELETE FROM kalshi_raw_pages WHERE poll_ts = ?").bind(pollTs),
     db.prepare("DELETE FROM kalshi_normalized_markets WHERE poll_ts = ?").bind(pollTs),
   ];
-
-  for (const page of pages) {
-    statements.push(
-      db
-        .prepare(
-          `INSERT INTO kalshi_raw_pages
-           (poll_ts, page_index, request_cursor, response_cursor, market_count, payload, fetched_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(
-          pollTs,
-          page.pageIndex,
-          page.requestCursor,
-          page.responseCursor,
-          page.marketCount,
-          JSON.stringify(page.payload),
-          createdAt,
-        ),
-    );
-  }
 
   for (const market of normalized) {
     statements.push(
@@ -83,7 +70,7 @@ export async function saveKalshiIngest(
     );
   }
 
-  await db.batch(statements);
+  await runStatementBatches(db, statements);
   return batch;
 }
 

@@ -37,7 +37,7 @@ class MockD1Database {
 }
 
 describe("saveKalshiIngest", () => {
-  it("stores raw API pages and normalized market records for a poll", async () => {
+  it("stores ingest batch metadata and normalized market records for a poll", async () => {
     const db = new MockD1Database();
     const pollTs = "2026-06-26T12:00:00.000Z";
     const pages: KalshiIngestPage[] = [
@@ -80,14 +80,8 @@ describe("saveKalshiIngest", () => {
 
     const sql = db.statements.map((s) => s.sql);
     assert.ok(sql.some((q) => q.includes("INSERT INTO kalshi_ingest_batches")));
-    assert.equal(sql.filter((q) => q.includes("INSERT INTO kalshi_raw_pages")).length, 2);
+    assert.equal(sql.filter((q) => q.includes("INSERT INTO kalshi_raw_pages")).length, 0);
     assert.equal(sql.filter((q) => q.includes("INSERT INTO kalshi_normalized_markets")).length, 1);
-
-    const rawInsert = db.statements.find((s) => s.sql.includes("INSERT INTO kalshi_raw_pages"));
-    assert.equal(rawInsert?.binds[0], pollTs);
-    assert.equal(rawInsert?.binds[1], 0);
-    assert.equal(rawInsert?.binds[4], 2);
-    assert.match(String(rawInsert?.binds[5]), /"ticker":"A"/);
 
     const normalizedInsert = db.statements.find((s) => s.sql.includes("INSERT INTO kalshi_normalized_markets"));
     assert.equal(normalizedInsert?.binds[1], "RECESSION-2026");
