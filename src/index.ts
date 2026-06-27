@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { loadConfig } from "./config";
-import { runPoll } from "./poll";
+import { kalshiAuthStatus } from "./sources/kalshi";
 import {
   ensureTables,
   getHealth,
@@ -24,10 +24,24 @@ function opportunityPayload(opp: Opportunity) {
 }
 
 app.get("/health", async (c) =>
-  c.json(await getHealth(c.env.DB, loadConfig(c.env), c.env.ENVIRONMENT ?? "production")),
+  c.json(
+    await getHealth(
+      c.env.DB,
+      loadConfig(c.env),
+      c.env.ENVIRONMENT ?? "production",
+      await kalshiAuthStatus(c.env),
+    ),
+  ),
 );
 app.get("/status", async (c) =>
-  c.json(await getHealth(c.env.DB, loadConfig(c.env), c.env.ENVIRONMENT ?? "production")),
+  c.json(
+    await getHealth(
+      c.env.DB,
+      loadConfig(c.env),
+      c.env.ENVIRONMENT ?? "production",
+      await kalshiAuthStatus(c.env),
+    ),
+  ),
 );
 
 app.get("/markets", async (c) => {

@@ -1,11 +1,15 @@
-import { createKalshiAuthHeaders, type KalshiAuthCredentials } from "./kalshi-auth.ts";
+import {
+  createKalshiAuthHeaders,
+  verifyKalshiAuthCredentials,
+  type KalshiAuthCredentials,
+} from "./kalshi-auth.ts";
 
 export const KALSHI_BASE_URL = "https://api.elections.kalshi.com/trade-api/v2";
 export const KALSHI_MARKETS_PAGE_LIMIT = 1000;
 /** Stay under Cloudflare Workers free-tier external subrequest limit (50), leaving room for Polymarket. */
-export const KALSHI_MAX_PAGES = 25;
-export const KALSHI_PAGE_THROTTLE_MS = 750;
-export const KALSHI_MAX_RETRIES = 6;
+export const KALSHI_MAX_PAGES = 10;
+export const KALSHI_PAGE_THROTTLE_MS = 1500;
+export const KALSHI_MAX_RETRIES = 3;
 export const KALSHI_RETRY_BASE_MS = 1000;
 
 export interface KalshiMarketsApiResponse {
@@ -116,7 +120,10 @@ export async function fetchKalshiMarketsPage(
       continue;
     }
 
-    if (!resp.ok) throw new Error(`Kalshi fetch failed: ${resp.status}`);
+    if (!resp.ok) {
+      if (resp.status === 401) throw new Error("Kalshi auth failed: 401");
+      throw new Error(`Kalshi fetch failed: ${resp.status}`);
+    }
     const data = (await resp.json()) as KalshiMarketsApiResponse | Record<string, unknown>[];
     return parseKalshiMarketsPage(data);
   }
@@ -174,6 +181,15 @@ export function kalshiAuthFromEnv(env: {
   const privateKeyPem = env.KALSHI_PRIVATE_KEY?.trim();
   if (!accessKey || !privateKeyPem) return undefined;
   return { accessKey, privateKeyPem };
+}
+
+export async function kalshiAuthStatus(env: {
+  KALSHI_ACCESS_KEY?: string;
+  KALSHI_PRIVATE_KEY?: string;
+}): Promise<"missing" | "invalid" | "configured"> {
+  const auth = kalshiAuthFromEnv(env);
+  if (!auth) return "missing";
+  return (await verifyKalshiAuthCredentials(auth)) ? "configured" : "invalid";
 }
 
 export async function kalshiHealthy(

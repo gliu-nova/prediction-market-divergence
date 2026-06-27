@@ -283,6 +283,7 @@ export async function getHealth(
   db: D1Database,
   config: AppConfig,
   environment = "production",
+  kalshiAuth: "missing" | "invalid" | "configured" = "missing",
 ): Promise<HealthStatus> {
   const lastPollAt = (await getState(db, "last_poll_at")) || null;
   const marketsTracked = parseInt((await getState(db, "last_markets_ingested")) || "0", 10);
@@ -301,6 +302,7 @@ export async function getHealth(
     signals_total: totalRow?.c ?? 0,
     sources: {
       kalshi: "ok",
+      kalshi_auth: kalshiAuth,
       polymarket: "ok",
       mode: config.useMock ? "mock" : "live",
       runtime: "cloudflare-pages",

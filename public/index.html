@@ -89,7 +89,7 @@
     }
 
     function sourceBadge(label, value) {
-      const ok = value === 'ok';
+      const ok = value === 'ok' || value === 'configured';
       return `<span class="source"><strong>${label}:</strong> <span class="${ok ? 'poll-ok' : 'poll-stale'}">${value || 'unknown'}</span></span>`;
     }
 
@@ -137,7 +137,7 @@
           <div><strong>Signals total:</strong> ${data.signals_total}</div>
           <div><strong>Mode:</strong> ${data.sources?.mode || 'unknown'}</div>
           <div><strong>Runtime:</strong> ${data.sources?.runtime || 'unknown'}</div>
-          <div class="sources">${sourceBadge('Kalshi', data.sources?.kalshi)} ${sourceBadge('Polymarket', data.sources?.polymarket)}</div>
+          <div class="sources">${sourceBadge('Kalshi auth', data.sources?.kalshi_auth)} ${sourceBadge('Kalshi', data.sources?.kalshi)} ${sourceBadge('Polymarket', data.sources?.polymarket)}</div>
         </div>
       `;
     }
