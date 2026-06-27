@@ -1,7 +1,9 @@
-import type { AppConfig, HealthStatus, MarketObservation, Opportunity, Signal } from "./types";
+import type { AppConfig, HealthStatus, MarketObservation, MatchedPair, Opportunity, Signal } from "./types";
 
 const ALIGNMENT_TOLERANCE_MS = 5 * 60 * 1000;
 const MAX_D1_TEXT_BYTES = 2000;
+const D1_BATCH_CHUNK_SIZE = 20;
+const D1_IN_CLAUSE_CHUNK_SIZE = 40;
 
 function truncateForD1(value: string, maxBytes = MAX_D1_TEXT_BYTES): string {
   const encoder = new TextEncoder();
@@ -96,6 +98,43 @@ async function setState(db: D1Database, key: string, value: string): Promise<voi
     .run();
 }
 
+async function runStatementBatches(db: D1Database, statements: D1PreparedStatement[]): Promise<void> {
+  for (let i = 0; i < statements.length; i += D1_BATCH_CHUNK_SIZE) {
+    await db.batch(statements.slice(i, i + D1_BATCH_CHUNK_SIZE));
+  }
+}
+
+export async function saveObservationsBatched(
+  db: D1Database,
+  observations: MarketObservation[],
+): Promise<number> {
+  if (!observations.length) return 0;
+
+  const statements = observations.map((obs) =>
+    db
+      .prepare(
+        `INSERT INTO observations
+         (venue, market_id, canonical_id, title, topic, probability, volume, liquidity, url, observed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        obs.venue,
+        obs.market_id,
+        obs.canonical_id,
+        truncateForD1(obs.title),
+        truncateForD1(obs.topic, 200),
+        obs.probability,
+        obs.volume,
+        obs.liquidity,
+        truncateForD1(obs.url, 500),
+        obs.observed_at,
+      ),
+  );
+
+  await runStatementBatches(db, statements);
+  return observations.length;
+}
+
 export async function saveObservations(
   db: D1Database,
   observations: MarketObservation[],
@@ -144,28 +183,17 @@ export async function pruneObservations(db: D1Database, retentionDays: number): 
   await db.prepare("DELETE FROM observations WHERE observed_at < ?").bind(cutoff).run();
 }
 
-export async function maxHistoricalGap(
-  db: D1Database,
-  canonicalId: string,
+function computeMaxHistoricalGapFromRows(
+  rows: Array<{ venue: string; probability: number; observed_at: string }>,
   venueA: string,
   venueB: string,
-  lookbackDays: number,
   excludeSince?: string,
-): Promise<number | null> {
-  const cutoff = new Date(Date.now() - lookbackDays * 86400000).toISOString();
+): number | null {
   const excludeTs = excludeSince ? new Date(excludeSince).getTime() : null;
-
-  const rows = await db
-    .prepare(
-      "SELECT venue, probability, observed_at FROM observations WHERE canonical_id = ? AND observed_at >= ? ORDER BY observed_at ASC",
-    )
-    .bind(canonicalId, cutoff)
-    .all<{ venue: string; probability: number; observed_at: string }>();
-
-  const seriesA = rows.results.filter(
+  const seriesA = rows.filter(
     (r) => r.venue === venueA && (!excludeTs || new Date(r.observed_at).getTime() < excludeTs),
   );
-  const seriesB = rows.results.filter(
+  const seriesB = rows.filter(
     (r) => r.venue === venueB && (!excludeTs || new Date(r.observed_at).getTime() < excludeTs),
   );
   if (!seriesA.length || !seriesB.length) return null;
@@ -188,20 +216,84 @@ export async function maxHistoricalGap(
   return gaps.length ? Math.max(...gaps) : null;
 }
 
+export async function maxHistoricalGapsForPairs(
+  db: D1Database,
+  pairs: MatchedPair[],
+  lookbackDays: number,
+  excludeSince?: string,
+): Promise<Map<string, number | null>> {
+  const result = new Map<string, number | null>();
+  if (!pairs.length) return result;
+
+  const cutoff = new Date(Date.now() - lookbackDays * 86400000).toISOString();
+  const canonicalIds = [...new Set(pairs.map((pair) => pair.match_key))];
+  const rowsByCanonical = new Map<string, Array<{ venue: string; probability: number; observed_at: string }>>();
+
+  for (let i = 0; i < canonicalIds.length; i += D1_IN_CLAUSE_CHUNK_SIZE) {
+    const chunk = canonicalIds.slice(i, i + D1_IN_CLAUSE_CHUNK_SIZE);
+    const placeholders = chunk.map(() => "?").join(",");
+    const rows = await db
+      .prepare(
+        `SELECT canonical_id, venue, probability, observed_at FROM observations
+         WHERE observed_at >= ? AND canonical_id IN (${placeholders})
+         ORDER BY observed_at ASC`,
+      )
+      .bind(cutoff, ...chunk)
+      .all<{ canonical_id: string; venue: string; probability: number; observed_at: string }>();
+
+    for (const row of rows.results) {
+      const series = rowsByCanonical.get(row.canonical_id) ?? [];
+      series.push({ venue: row.venue, probability: row.probability, observed_at: row.observed_at });
+      rowsByCanonical.set(row.canonical_id, series);
+    }
+  }
+
+  for (const pair of pairs) {
+    const venueA = pair.market_a.venue === "kalshi" ? "Kalshi" : "Polymarket";
+    const venueB = pair.market_b.venue === "kalshi" ? "Kalshi" : "Polymarket";
+    const rows = rowsByCanonical.get(pair.match_key) ?? [];
+    result.set(
+      pair.match_key,
+      computeMaxHistoricalGapFromRows(rows, venueA, venueB, excludeSince),
+    );
+  }
+
+  return result;
+}
+
+export async function maxHistoricalGap(
+  db: D1Database,
+  canonicalId: string,
+  venueA: string,
+  venueB: string,
+  lookbackDays: number,
+  excludeSince?: string,
+): Promise<number | null> {
+  const cutoff = new Date(Date.now() - lookbackDays * 86400000).toISOString();
+  const rows = await db
+    .prepare(
+      "SELECT venue, probability, observed_at FROM observations WHERE canonical_id = ? AND observed_at >= ? ORDER BY observed_at ASC",
+    )
+    .bind(canonicalId, cutoff)
+    .all<{ venue: string; probability: number; observed_at: string }>();
+
+  return computeMaxHistoricalGapFromRows(rows.results, venueA, venueB, excludeSince);
+}
+
 export async function syncActiveSignals(db: D1Database, signals: Signal[]): Promise<void> {
   const activeIds = new Set(signals.map((s) => s.id));
   const now = new Date().toISOString();
 
-  for (const signal of signals) {
-    await db
+  const upserts = signals.map((signal) =>
+    db
       .prepare(
         `INSERT INTO signals (id, type, payload, score, is_active, created_at)
          VALUES (?, ?, ?, ?, 1, ?)
          ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, score = excluded.score, is_active = 1, created_at = excluded.created_at`,
       )
-      .bind(signal.id, signal.type, JSON.stringify(signal), signal.score, signal.created_at)
-      .run();
-  }
+      .bind(signal.id, signal.type, JSON.stringify(signal), signal.score, signal.created_at),
+  );
+  await runStatementBatches(db, upserts);
 
   const activeRows = await db
     .prepare("SELECT id FROM signals WHERE is_active = 1")

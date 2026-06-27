@@ -148,7 +148,7 @@ describe("fetchKalshiMarketsPages", () => {
   });
 
   it("defaults maxPages to KALSHI_MAX_PAGES", () => {
-    assert.equal(KALSHI_MAX_PAGES, 10);
+    assert.equal(KALSHI_MAX_PAGES, 8);
   });
 
   it("waits between pages when pageThrottleMs is set", async () => {

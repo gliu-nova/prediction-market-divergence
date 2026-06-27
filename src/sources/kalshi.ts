@@ -6,8 +6,8 @@ import {
 
 export const KALSHI_BASE_URL = "https://api.elections.kalshi.com/trade-api/v2";
 export const KALSHI_MARKETS_PAGE_LIMIT = 1000;
-/** Stay under Cloudflare Workers free-tier external subrequest limit (50), leaving room for Polymarket. */
-export const KALSHI_MAX_PAGES = 10;
+/** Stay under Cloudflare Workers subrequest limit (50 free / 1000 paid), including Kalshi fetches + D1. */
+export const KALSHI_MAX_PAGES = 8;
 export const KALSHI_PAGE_THROTTLE_MS = 1500;
 export const KALSHI_MAX_RETRIES = 3;
 export const KALSHI_RETRY_BASE_MS = 1000;

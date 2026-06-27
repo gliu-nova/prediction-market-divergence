@@ -6,18 +6,34 @@ import { fetchKalshiMarkets, kalshiAuthFromEnv } from "./sources/kalshi";
 import { fetchMockMarkets } from "./sources/mock";
 import { fetchPolymarketMarkets } from "./sources/polymarket";
 import {
-  maxHistoricalGap,
+  maxHistoricalGapsForPairs,
   pruneObservations,
   recordPollResult,
-  saveObservations,
+  saveObservationsBatched,
   syncActiveSignals,
 } from "./storage";
-import type { CanonicalMarket, Env } from "./types";
+import type { CanonicalMarket, Env, MarketObservation, MatchedPair } from "./types";
 
 export interface PollResult {
   markets: number;
   pairs: number;
   opportunities: number;
+}
+
+function observationsForPairs(pairs: MatchedPair[]): MarketObservation[] {
+  const seen = new Set<string>();
+  const observations: MarketObservation[] = [];
+
+  for (const pair of pairs) {
+    for (const market of [pair.market_a, pair.market_b]) {
+      const key = `${market.venue}:${market.market_id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      observations.push(toObservation(market));
+    }
+  }
+
+  return observations;
 }
 
 export async function runPoll(env: Env): Promise<PollResult> {
@@ -42,30 +58,17 @@ export async function runPoll(env: Env): Promise<PollResult> {
     }
 
     const markets: CanonicalMarket[] = [];
-    const observations = [];
     for (const raw of [...kalshiRaw, ...polyRaw]) {
       const canonical = normalizeRawMarket(raw, pollTs);
       if (!canonical) continue;
       markets.push(canonical);
-      observations.push(toObservation(canonical));
     }
-
-    await saveObservations(env.DB, observations, 150);
-    await pruneObservations(env.DB, config.observationRetentionDays);
 
     const pairs = matchCrossVenue(markets);
-    const maxGapByPair = new Map<string, number | null>();
-    for (const pair of pairs) {
-      const gap = await maxHistoricalGap(
-        env.DB,
-        pair.match_key,
-        pair.market_a.venue === "kalshi" ? "Kalshi" : "Polymarket",
-        pair.market_b.venue === "kalshi" ? "Kalshi" : "Polymarket",
-        config.lookbackDays,
-        pollTs,
-      );
-      maxGapByPair.set(pair.match_key, gap);
-    }
+    await saveObservationsBatched(env.DB, observationsForPairs(pairs));
+    await pruneObservations(env.DB, config.observationRetentionDays);
+
+    const maxGapByPair = await maxHistoricalGapsForPairs(env.DB, pairs, config.lookbackDays, pollTs);
 
     const signals = detectCrossVenue(config, pairs, maxGapByPair);
     await syncActiveSignals(env.DB, signals);
