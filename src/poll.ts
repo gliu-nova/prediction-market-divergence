@@ -1,6 +1,5 @@
 import { loadConfig } from "./config";
 import { detectCrossVenue } from "./divergence";
-import { pruneKalshiIngest, saveKalshiIngest } from "./kalshi-ingest";
 import { matchCrossVenue } from "./matcher";
 import { normalizeRawMarket, toObservation } from "./normalize";
 import { fetchKalshiMarkets, kalshiAuthFromEnv } from "./sources/kalshi";
@@ -40,14 +39,6 @@ export async function runPoll(env: Env): Promise<PollResult> {
       ]);
       kalshiRaw = kalshiIngest.markets;
       polyRaw = polymarketRaw;
-
-      const kalshiNormalized: CanonicalMarket[] = [];
-      for (const raw of kalshiRaw) {
-        const canonical = normalizeRawMarket(raw, pollTs);
-        if (canonical) kalshiNormalized.push(canonical);
-      }
-      await saveKalshiIngest(env.DB, pollTs, kalshiIngest.pages, kalshiNormalized);
-      await pruneKalshiIngest(env.DB, config.observationRetentionDays);
     }
 
     const markets: CanonicalMarket[] = [];

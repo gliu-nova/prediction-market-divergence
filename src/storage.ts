@@ -1,6 +1,17 @@
 import type { AppConfig, HealthStatus, MarketObservation, Opportunity, Signal } from "./types";
 
 const ALIGNMENT_TOLERANCE_MS = 5 * 60 * 1000;
+const MAX_D1_TEXT_BYTES = 2000;
+
+function truncateForD1(value: string, maxBytes = MAX_D1_TEXT_BYTES): string {
+  const encoder = new TextEncoder();
+  if (encoder.encode(value).length <= maxBytes) return value;
+  let end = value.length;
+  while (end > 0 && encoder.encode(value.slice(0, end)).length > maxBytes) {
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
 
 export async function ensureTables(db: D1Database): Promise<void> {
   await db.batch([
@@ -114,12 +125,12 @@ export async function saveObservations(
         obs.venue,
         obs.market_id,
         obs.canonical_id,
-        obs.title,
-        obs.topic,
+        truncateForD1(obs.title),
+        truncateForD1(obs.topic, 200),
         obs.probability,
         obs.volume,
         obs.liquidity,
-        obs.url,
+        truncateForD1(obs.url, 500),
         obs.observed_at,
       )
       .run();
@@ -197,9 +208,10 @@ export async function syncActiveSignals(db: D1Database, signals: Signal[]): Prom
     .all<{ id: string }>();
 
   const stale = activeRows.results.map((r) => r.id).filter((id) => !activeIds.has(id));
-  if (stale.length) {
-    const placeholders = stale.map(() => "?").join(",");
-    await db.prepare(`UPDATE signals SET is_active = 0 WHERE id IN (${placeholders})`).bind(...stale).run();
+  for (let i = 0; i < stale.length; i += 50) {
+    const chunk = stale.slice(i, i + 50);
+    const placeholders = chunk.map(() => "?").join(",");
+    await db.prepare(`UPDATE signals SET is_active = 0 WHERE id IN (${placeholders})`).bind(...chunk).run();
   }
 
   const maxAgeCutoff = new Date(Date.now() - 24 * 3600000).toISOString();
