@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { loadConfig } from "./config";
+import { runPoll } from "./poll";
 import { kalshiAuthStatus } from "./sources/kalshi";
 import {
   ensureTables,
