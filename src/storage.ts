@@ -281,9 +281,6 @@ export async function maxHistoricalGap(
 }
 
 export async function syncActiveSignals(db: D1Database, signals: Signal[]): Promise<void> {
-  const activeIds = new Set(signals.map((s) => s.id));
-  const now = new Date().toISOString();
-
   const upserts = signals.map((signal) =>
     db
       .prepare(
@@ -293,22 +290,13 @@ export async function syncActiveSignals(db: D1Database, signals: Signal[]): Prom
       )
       .bind(signal.id, signal.type, JSON.stringify(signal), signal.score, signal.created_at),
   );
-  await runStatementBatches(db, upserts);
-
-  const activeRows = await db
-    .prepare("SELECT id FROM signals WHERE is_active = 1")
-    .all<{ id: string }>();
-
-  const stale = activeRows.results.map((r) => r.id).filter((id) => !activeIds.has(id));
-  for (let i = 0; i < stale.length; i += 50) {
-    const chunk = stale.slice(i, i + 50);
-    const placeholders = chunk.map(() => "?").join(",");
-    await db.prepare(`UPDATE signals SET is_active = 0 WHERE id IN (${placeholders})`).bind(...chunk).run();
-  }
 
   const maxAgeCutoff = new Date(Date.now() - 24 * 3600000).toISOString();
-  await db.prepare("DELETE FROM signals WHERE is_active = 0 AND created_at < ?").bind(maxAgeCutoff).run();
-  await setState(db, "signals_synced_at", now);
+  await db.batch([
+    db.prepare("UPDATE signals SET is_active = 0 WHERE is_active = 1"),
+    db.prepare("DELETE FROM signals WHERE is_active = 0 AND created_at < ?").bind(maxAgeCutoff),
+  ]);
+  await runStatementBatches(db, upserts);
 }
 
 function parseSignal(row: { payload: string }): Signal {
@@ -420,8 +408,18 @@ export async function recordPollResult(
   result: { markets: number; pairs: number; opportunities: number; error?: string },
 ): Promise<void> {
   const now = new Date().toISOString();
-  await setState(db, "last_poll_at", now);
-  await setState(db, "last_markets_ingested", String(result.markets));
-  await setState(db, "last_opportunities_found", String(result.opportunities));
-  await setState(db, "last_error", result.error ?? "");
+  await db.batch([
+    db
+      .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .bind("last_poll_at", now),
+    db
+      .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .bind("last_markets_ingested", String(result.markets)),
+    db
+      .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .bind("last_opportunities_found", String(result.opportunities)),
+    db
+      .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .bind("last_error", result.error ?? ""),
+  ]);
 }

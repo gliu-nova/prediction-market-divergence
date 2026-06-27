@@ -4,7 +4,6 @@ import { loadConfig } from "./config";
 import { runPoll } from "./poll";
 import { kalshiAuthStatus } from "./sources/kalshi";
 import {
-  ensureTables,
   getHealth,
   getOpportunities,
   getSignalById,
@@ -15,10 +14,6 @@ import type { Env, Opportunity } from "./types";
 const app = new Hono<{ Bindings: Env }>();
 
 app.use("*", cors({ origin: "*" }));
-app.use("*", async (c, next) => {
-  await ensureTables(c.env.DB);
-  await next();
-});
 
 function opportunityPayload(opp: Opportunity) {
   return { ...opp, detected_at: opp.detected_at };
