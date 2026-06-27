@@ -9,7 +9,7 @@
   "scripts": {
     "db:remote": "wrangler d1 execute prediction-market-divergence --remote --file=./migrations/0001_init.sql",
     "db:remote:kalshi": "wrangler d1 execute prediction-market-divergence --remote --file=./migrations/0002_kalshi_ingestion.sql",
-    "test": "node --experimental-strip-types --test src/sources/kalshi.test.ts src/kalshi-ingest.test.ts",
+    "test": "node --experimental-strip-types --test src/sources/kalshi.test.ts src/sources/kalshi-auth.test.ts src/kalshi-ingest.test.ts",
     "deploy": "wrangler pages deploy public --project-name=prediction-market-divergence"
   },
   "dependencies": {

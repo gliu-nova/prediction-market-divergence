@@ -3,7 +3,7 @@ import { detectCrossVenue } from "./divergence";
 import { pruneKalshiIngest, saveKalshiIngest } from "./kalshi-ingest";
 import { matchCrossVenue } from "./matcher";
 import { normalizeRawMarket, toObservation } from "./normalize";
-import { fetchKalshiMarkets } from "./sources/kalshi";
+import { fetchKalshiMarkets, kalshiAuthFromEnv } from "./sources/kalshi";
 import { fetchMockMarkets } from "./sources/mock";
 import { fetchPolymarketMarkets } from "./sources/polymarket";
 import {
@@ -33,8 +33,9 @@ export async function runPoll(env: Env): Promise<PollResult> {
       kalshiRaw = fetchMockMarkets("kalshi", pollTs);
       polyRaw = fetchMockMarkets("polymarket", pollTs);
     } else {
+      const kalshiAuth = kalshiAuthFromEnv(env);
       const [kalshiIngest, polymarketRaw] = await Promise.all([
-        fetchKalshiMarkets(pollTs),
+        fetchKalshiMarkets(pollTs, { auth: kalshiAuth }),
         fetchPolymarketMarkets(pollTs),
       ]);
       kalshiRaw = kalshiIngest.markets;

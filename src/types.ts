@@ -10,6 +10,8 @@ export interface Env {
   OPPORTUNITY_MAX_AGE_HOURS?: string;
   OBSERVATION_RETENTION_DAYS?: string;
   POLL_SECRET?: string;
+  KALSHI_ACCESS_KEY?: string;
+  KALSHI_PRIVATE_KEY?: string;
 }
 
 export interface MarketSide {

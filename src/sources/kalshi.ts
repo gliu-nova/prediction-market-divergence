@@ -1,3 +1,5 @@
+import { createKalshiAuthHeaders, type KalshiAuthCredentials } from "./kalshi-auth.ts";
+
 export const KALSHI_BASE_URL = "https://api.elections.kalshi.com/trade-api/v2";
 export const KALSHI_MARKETS_PAGE_LIMIT = 1000;
 /** Stay under Cloudflare Workers free-tier external subrequest limit (50), leaving room for Polymarket. */
@@ -37,6 +39,7 @@ export interface KalshiFetchOptions {
   pageThrottleMs?: number;
   maxRetries?: number;
   maxPages?: number;
+  auth?: KalshiAuthCredentials;
 }
 
 export function isMveParlayMarket(raw: Record<string, unknown>): boolean {
@@ -101,9 +104,12 @@ export async function fetchKalshiMarketsPage(
   const url = buildKalshiMarketsUrl(cursor);
 
   for (let attempt = 0; attempt < maxRetries; attempt += 1) {
-    const resp = await fetchFn(url, {
-      headers: { Accept: "application/json" },
-    });
+    const headers: Record<string, string> = { Accept: "application/json" };
+    if (options.auth) {
+      Object.assign(headers, await createKalshiAuthHeaders(options.auth, "GET", url));
+    }
+
+    const resp = await fetchFn(url, { headers });
 
     if (resp.status === 429 && attempt < maxRetries - 1) {
       await sleep(retryDelayMs(attempt, resp.headers.get("Retry-After")));
@@ -160,9 +166,27 @@ export async function fetchKalshiMarkets(
   return { pages, markets };
 }
 
-export async function kalshiHealthy(fetchFn: FetchLike = fetch): Promise<boolean> {
+export function kalshiAuthFromEnv(env: {
+  KALSHI_ACCESS_KEY?: string;
+  KALSHI_PRIVATE_KEY?: string;
+}): KalshiAuthCredentials | undefined {
+  const accessKey = env.KALSHI_ACCESS_KEY?.trim();
+  const privateKeyPem = env.KALSHI_PRIVATE_KEY?.trim();
+  if (!accessKey || !privateKeyPem) return undefined;
+  return { accessKey, privateKeyPem };
+}
+
+export async function kalshiHealthy(
+  fetchFn: FetchLike = fetch,
+  auth?: KalshiAuthCredentials,
+): Promise<boolean> {
   try {
-    const resp = await fetchFn(`${KALSHI_BASE_URL}/markets?limit=1&mve_filter=exclude`);
+    const url = `${KALSHI_BASE_URL}/markets?limit=1&mve_filter=exclude`;
+    const headers: Record<string, string> = { Accept: "application/json" };
+    if (auth) {
+      Object.assign(headers, await createKalshiAuthHeaders(auth, "GET", url));
+    }
+    const resp = await fetchFn(url, { headers });
     return resp.ok;
   } catch {
     return false;

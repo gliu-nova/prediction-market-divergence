@@ -28,3 +28,5 @@ USE_MOCK = "true"
 
 # Secrets (set in dashboard or via wrangler pages secret put):
 #   POLL_SECRET — optional bearer token for POST /poll
+#   KALSHI_ACCESS_KEY — Kalshi API key ID (UUID from Kalshi dashboard)
+#   KALSHI_PRIVATE_KEY — Kalshi RSA private key PEM (full file contents)

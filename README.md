@@ -74,13 +74,27 @@ Pages project → **Settings** → **Bindings**:
 | `LOOKBACK_DAYS` | `30` | |
 | `OPPORTUNITY_MAX_AGE_HOURS` | `24` | |
 
-**Secrets** (optional but recommended):
+**Secrets**:
+
+| Cloudflare secret name | Value |
+|------------------------|-------|
+| `POLL_SECRET` | Optional bearer token for `POST /poll` |
+| `KALSHI_ACCESS_KEY` | Kalshi API key ID (UUID from Kalshi → Account → API) |
+| `KALSHI_PRIVATE_KEY` | Full RSA private key PEM downloaded when the key was created |
+
+Set via CLI:
 
 ```bash
 npx wrangler pages secret put POLL_SECRET --project-name=prediction-market-divergence
+npx wrangler pages secret put KALSHI_ACCESS_KEY --project-name=prediction-market-divergence
+npx wrangler pages secret put KALSHI_PRIVATE_KEY --project-name=prediction-market-divergence
 ```
 
-Protects `POST /poll`. If set, also add the same value as `POLL_SECRET` in GitHub Actions secrets (see step 5).
+Or in the dashboard: Pages project → **Settings** → **Variables and Secrets** → **Encrypt** → variable name exactly as above.
+
+Kalshi requires **both** `KALSHI_ACCESS_KEY` and `KALSHI_PRIVATE_KEY`. Without them, market fetches are unauthenticated and may hit 429 rate limits. Never commit these values to git.
+
+If `POLL_SECRET` is set, also add the same value as `POLL_SECRET` in GitHub Actions secrets (see step 4).
 
 ### 4. GitHub Actions secrets
 
