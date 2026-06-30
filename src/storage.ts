@@ -11,6 +11,7 @@ import type {
   MatchedPairsPage,
   Opportunity,
   Signal,
+  VenueBreakdown,
 } from "./types";
 
 const ALIGNMENT_TOLERANCE_MS = 5 * 60 * 1000;
@@ -419,6 +420,108 @@ export async function getSignalById(db: D1Database, id: string): Promise<Signal 
   return row ? parseSignal(row) : null;
 }
 
+async function countIngestedMarketsByVenue(
+  db: D1Database,
+  pollTs: string | null,
+): Promise<{ kalshi: number; polymarket: number }> {
+  if (!pollTs) {
+    return { kalshi: 0, polymarket: 0 };
+  }
+  const rows = await db
+    .prepare(
+      `SELECT venue, COUNT(*) AS c
+       FROM ingested_markets
+       WHERE poll_ts = ?
+       GROUP BY venue`,
+    )
+    .bind(pollTs)
+    .all<{ venue: string; c: number }>();
+  const counts = { kalshi: 0, polymarket: 0 };
+  for (const row of rows.results ?? []) {
+    if (row.venue === "kalshi") counts.kalshi = row.c;
+    if (row.venue === "polymarket") counts.polymarket = row.c;
+  }
+  return counts;
+}
+
+async function countPairsByVenue(
+  db: D1Database,
+  pollTs: string | null,
+): Promise<{ kalshi: number; polymarket: number }> {
+  if (!pollTs) {
+    return { kalshi: 0, polymarket: 0 };
+  }
+  const row = await db
+    .prepare("SELECT COUNT(*) AS c FROM matched_pair_snapshots WHERE poll_ts = ?")
+    .bind(pollTs)
+    .first<{ c: number }>();
+  const pairCount = row?.c ?? 0;
+  return { kalshi: pairCount, polymarket: pairCount };
+}
+
+async function latestPolymarketRunStats(
+  db: D1Database,
+): Promise<{ markets_enriched: number | null; snapshots_stored: number | null }> {
+  const row = await db
+    .prepare(
+      `SELECT markets_enriched, snapshots_stored
+       FROM poly_ingestion_runs
+       ORDER BY started_at DESC
+       LIMIT 1`,
+    )
+    .first<{ markets_enriched: number; snapshots_stored: number }>();
+  if (!row) {
+    return { markets_enriched: null, snapshots_stored: null };
+  }
+  return {
+    markets_enriched: row.markets_enriched,
+    snapshots_stored: row.snapshots_stored,
+  };
+}
+
+async function signalCountsByVenue(
+  db: D1Database,
+): Promise<{ kalshi: { active: number; total: number }; polymarket: { active: number; total: number } }> {
+  const rows = await db
+    .prepare("SELECT payload, is_active FROM signals")
+    .all<{ payload: string; is_active: number }>();
+
+  const counts = {
+    kalshi: { active: 0, total: 0 },
+    polymarket: { active: 0, total: 0 },
+  };
+
+  for (const row of rows.results ?? []) {
+    const signal = parseSignal(row);
+    const venues = new Set<string>([signal.market_a.venue, signal.market_b?.venue].filter(Boolean) as string[]);
+    for (const venue of venues) {
+      if (venue !== "kalshi" && venue !== "polymarket") continue;
+      counts[venue].total += 1;
+      if (row.is_active) counts[venue].active += 1;
+    }
+  }
+
+  return counts;
+}
+
+function buildVenueBreakdown(
+  venue: "kalshi" | "polymarket",
+  ingested: number,
+  inPairs: number,
+  enriched: number | null,
+  snapshots: number | null,
+  signalCounts: { active: number; total: number },
+): VenueBreakdown {
+  return {
+    markets_ingested: ingested,
+    markets_in_pairs: inPairs,
+    markets_enriched: venue === "polymarket" ? enriched : null,
+    snapshots_stored: venue === "polymarket" ? snapshots : null,
+    active_signals: signalCounts.active,
+    signals_total: signalCounts.total,
+  };
+}
+
 export async function getHealth(
   db: D1Database,
   config: AppConfig,
@@ -426,6 +529,7 @@ export async function getHealth(
   kalshiAuth: "missing" | "invalid" | "configured" = "missing",
 ): Promise<HealthStatus> {
   const lastPollAt = (await getState(db, "last_poll_at")) || null;
+  const snapshotTs = (await getState(db, "last_ingestion_snapshot_ts")) || null;
   const marketsTracked = parseInt((await getState(db, "last_markets_ingested")) || "0", 10);
   const matchedPairs = parseInt((await getState(db, "last_pairs_matched")) || "0", 10);
   const kalshiMarkets = parseInt((await getState(db, "last_kalshi_markets")) || "0", 10);
@@ -438,6 +542,16 @@ export async function getHealth(
   const totalRow = await db.prepare("SELECT COUNT(*) AS c FROM signals").first<{ c: number }>();
   const activeOpportunities = activeRow?.c ?? 0;
   const signalsTotal = totalRow?.c ?? 0;
+
+  const [ingestedByVenue, pairsByVenue, polyRunStats, signalByVenue] = await Promise.all([
+    countIngestedMarketsByVenue(db, snapshotTs),
+    countPairsByVenue(db, snapshotTs),
+    latestPolymarketRunStats(db),
+    signalCountsByVenue(db),
+  ]);
+
+  const kalshiIngested = ingestedByVenue.kalshi || kalshiMarkets;
+  const polymarketIngested = ingestedByVenue.polymarket || polymarketMarkets;
 
   return {
     status: lastError ? "degraded" : "ok",
@@ -456,6 +570,24 @@ export async function getHealth(
       active_opportunities: activeOpportunities,
       signals_total: signalsTotal,
       last_opportunities_found: lastOpportunitiesFound,
+    },
+    venues: {
+      kalshi: buildVenueBreakdown(
+        "kalshi",
+        kalshiIngested,
+        pairsByVenue.kalshi,
+        null,
+        null,
+        signalByVenue.kalshi,
+      ),
+      polymarket: buildVenueBreakdown(
+        "polymarket",
+        polymarketIngested,
+        pairsByVenue.polymarket,
+        polyRunStats.markets_enriched,
+        polyRunStats.snapshots_stored,
+        signalByVenue.polymarket,
+      ),
     },
     sources: {
       kalshi: "ok",
@@ -550,8 +682,17 @@ export async function listIngestedMarkets(
 ): Promise<IngestedMarketsPage> {
   const pollTs = (await getState(db, "last_ingestion_snapshot_ts")) || null;
   if (!pollTs) {
-    return { poll_ts: null, total: 0, offset: 0, limit: opts.limit ?? 50, markets: [] };
+    return {
+      poll_ts: null,
+      total: 0,
+      offset: 0,
+      limit: opts.limit ?? 50,
+      venue_counts: { kalshi: 0, polymarket: 0 },
+      markets: [],
+    };
   }
+
+  const venueCounts = await countIngestedMarketsByVenue(db, pollTs);
 
   const offset = Math.max(0, opts.offset ?? 0);
   const limit = Math.min(200, Math.max(1, opts.limit ?? 50));
@@ -584,6 +725,7 @@ export async function listIngestedMarkets(
     total: countRow?.c ?? 0,
     offset,
     limit,
+    venue_counts: venueCounts,
     markets: rows.results ?? [],
   };
 }

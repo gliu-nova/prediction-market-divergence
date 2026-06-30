@@ -132,6 +132,7 @@ export interface IngestedMarketsPage {
   total: number;
   offset: number;
   limit: number;
+  venue_counts: { kalshi: number; polymarket: number };
   markets: IngestedMarketRow[];
 }
 
@@ -156,6 +157,15 @@ export interface OutputSummary {
   last_opportunities_found: number;
 }
 
+export interface VenueBreakdown {
+  markets_ingested: number;
+  markets_in_pairs: number;
+  markets_enriched: number | null;
+  snapshots_stored: number | null;
+  active_signals: number;
+  signals_total: number;
+}
+
 export interface HealthStatus {
   status: string;
   last_poll_at: string | null;
@@ -166,6 +176,10 @@ export interface HealthStatus {
   sources: Record<string, string>;
   ingestion: IngestionSummary;
   output: OutputSummary;
+  venues: {
+    kalshi: VenueBreakdown;
+    polymarket: VenueBreakdown;
+  };
 }
 
 export interface AppConfig {
