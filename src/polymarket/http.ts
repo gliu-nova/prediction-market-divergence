@@ -40,7 +40,8 @@ export class RateLimitedClient {
     logger: Logger = consoleLogger,
   ) {
     this.config = config;
-    this.fetchFn = fetchFn;
+    // fetch must not be invoked as a method (this.fetchFn) — Workers requires globalThis.
+    this.fetchFn = (url, init) => fetchFn(url, init);
     this.logger = logger;
   }
 
