@@ -11,6 +11,7 @@ import {
   maxHistoricalGapsForPairs,
   pruneObservations,
   recordPollResult,
+  saveIngestedSnapshot,
   saveObservationsBatched,
   syncActiveSignals,
 } from "./storage";
@@ -70,6 +71,7 @@ export async function runPoll(env: Env): Promise<PollResult> {
     }
 
     const pairs = matchCrossVenue(markets);
+    await saveIngestedSnapshot(env.DB, pollTs, markets, pairs);
     await saveObservationsBatched(env.DB, observationsForPairs(pairs));
     await pruneObservations(env.DB, config.observationRetentionDays);
 
@@ -77,16 +79,28 @@ export async function runPoll(env: Env): Promise<PollResult> {
 
     const signals = detectCrossVenue(config, pairs, maxGapByPair);
     await syncActiveSignals(env.DB, signals);
+    const kalshiMarkets = markets.filter((market) => market.venue === "kalshi").length;
+    const polymarketMarkets = markets.filter((market) => market.venue === "polymarket").length;
+
     await recordPollResult(env.DB, {
       markets: markets.length,
       pairs: pairs.length,
       opportunities: signals.length,
+      kalshi_markets: kalshiMarkets,
+      polymarket_markets: polymarketMarkets,
     });
 
     return { markets: markets.length, pairs: pairs.length, opportunities: signals.length };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await recordPollResult(env.DB, { markets: 0, pairs: 0, opportunities: 0, error: message });
+    await recordPollResult(env.DB, {
+      markets: 0,
+      pairs: 0,
+      opportunities: 0,
+      kalshi_markets: 0,
+      polymarket_markets: 0,
+      error: message,
+    });
     throw err;
   }
 }

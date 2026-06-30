@@ -94,6 +94,68 @@ export interface MatchedPair {
   market_b: CanonicalMarket;
 }
 
+export interface IngestedMarketRow {
+  venue: string;
+  market_id: string;
+  title: string;
+  topic: string;
+  probability: number;
+  volume: number | null;
+  liquidity: number | null;
+  url: string;
+  match_key: string;
+  observed_at: string;
+}
+
+export interface MatchedPairRow {
+  match_key: string;
+  topic: string;
+  title: string;
+  market_a: {
+    venue: string;
+    market_id: string;
+    title: string;
+    probability: number;
+    url: string;
+  };
+  market_b: {
+    venue: string;
+    market_id: string;
+    title: string;
+    probability: number;
+    url: string;
+  };
+}
+
+export interface IngestedMarketsPage {
+  poll_ts: string | null;
+  total: number;
+  offset: number;
+  limit: number;
+  markets: IngestedMarketRow[];
+}
+
+export interface MatchedPairsPage {
+  poll_ts: string | null;
+  total: number;
+  offset: number;
+  limit: number;
+  pairs: MatchedPairRow[];
+}
+
+export interface IngestionSummary {
+  total_markets: number;
+  kalshi_markets: number;
+  polymarket_markets: number;
+  matched_pairs: number;
+}
+
+export interface OutputSummary {
+  active_opportunities: number;
+  signals_total: number;
+  last_opportunities_found: number;
+}
+
 export interface HealthStatus {
   status: string;
   last_poll_at: string | null;
@@ -102,6 +164,8 @@ export interface HealthStatus {
   active_opportunities: number;
   signals_total: number;
   sources: Record<string, string>;
+  ingestion: IngestionSummary;
+  output: OutputSummary;
 }
 
 export interface AppConfig {

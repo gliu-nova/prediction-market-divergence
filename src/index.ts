@@ -8,6 +8,8 @@ import {
   getOpportunities,
   getSignalById,
   getSignals,
+  listIngestedMarkets,
+  listMatchedPairSnapshots,
 } from "./storage";
 import type { Env, Opportunity } from "./types";
 
@@ -48,6 +50,21 @@ app.get("/markets", async (c) => {
     active_opportunities: health.active_opportunities,
     sources: health.sources,
   });
+});
+
+app.get("/ingestion/markets", async (c) => {
+  const offset = parseInt(c.req.query("offset") ?? "0", 10);
+  const limit = parseInt(c.req.query("limit") ?? "50", 10);
+  const venue = c.req.query("venue") ?? undefined;
+  const search = c.req.query("q") ?? undefined;
+  return c.json(await listIngestedMarkets(c.env.DB, { offset, limit, venue, search }));
+});
+
+app.get("/ingestion/pairs", async (c) => {
+  const offset = parseInt(c.req.query("offset") ?? "0", 10);
+  const limit = parseInt(c.req.query("limit") ?? "50", 10);
+  const search = c.req.query("q") ?? undefined;
+  return c.json(await listMatchedPairSnapshots(c.env.DB, { offset, limit, search }));
 });
 
 app.get("/signals/latest", async (c) => {
