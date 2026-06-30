@@ -7,6 +7,7 @@ import { fetchMockMarkets } from "./sources/mock";
 import { savePolymarketSnapshotD1 } from "./polymarket/storage-d1";
 import { fetchPolymarketSnapshot } from "./sources/polymarket";
 import {
+  ensureTables,
   maxHistoricalGapsForPairs,
   pruneObservations,
   recordPollResult,
@@ -42,6 +43,8 @@ export async function runPoll(env: Env): Promise<PollResult> {
   const pollTs = new Date().toISOString();
 
   try {
+    await ensureTables(env.DB);
+
     let kalshiRaw: Record<string, unknown>[] = [];
     let polyRaw: Record<string, unknown>[] = [];
 
