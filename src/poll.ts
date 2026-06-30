@@ -4,7 +4,8 @@ import { matchCrossVenue } from "./matcher";
 import { normalizeRawMarket, toObservation } from "./normalize";
 import { fetchKalshiMarkets, kalshiAuthFromEnv } from "./sources/kalshi";
 import { fetchMockMarkets } from "./sources/mock";
-import { fetchPolymarketMarkets } from "./sources/polymarket";
+import { savePolymarketSnapshotD1 } from "./polymarket/storage-d1";
+import { fetchPolymarketSnapshot } from "./sources/polymarket";
 import {
   maxHistoricalGapsForPairs,
   pruneObservations,
@@ -49,12 +50,13 @@ export async function runPoll(env: Env): Promise<PollResult> {
       polyRaw = fetchMockMarkets("polymarket", pollTs);
     } else {
       const kalshiAuth = kalshiAuthFromEnv(env);
-      const [kalshiIngest, polymarketRaw] = await Promise.all([
+      const [kalshiIngest, polymarketIngest] = await Promise.all([
         fetchKalshiMarkets(pollTs, { auth: kalshiAuth }),
-        fetchPolymarketMarkets(pollTs),
+        fetchPolymarketSnapshot(pollTs, { env: env as unknown as Record<string, string | undefined> }),
       ]);
       kalshiRaw = kalshiIngest.markets;
-      polyRaw = polymarketRaw;
+      polyRaw = polymarketIngest.legacyRawMarkets;
+      await savePolymarketSnapshotD1(env.DB, polymarketIngest);
     }
 
     const markets: CanonicalMarket[] = [];

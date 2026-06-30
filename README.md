@@ -195,6 +195,63 @@ twitter-bot polls `/opportunities` on each scheduled run (`prediction_markets.en
 
 ---
 
+## Polymarket ingestion
+
+Polymarket data is ingested through modular pipelines under `src/polymarket/`:
+
+| Module | Source | Purpose |
+|--------|--------|---------|
+| `discovery.ts` | Gamma API | Market/event discovery + metadata |
+| `clob-rest.ts` | CLOB REST | Batch prices, order books, last trade |
+| `clob-ws.ts` | CLOB WebSocket | Optional near-real-time book/price/trade events (CLI) |
+| `data-api.ts` | Polymarket Data API | Recent trades / activity backfill |
+| `snapshot.ts` | Orchestrator | Builds normalized snapshots for poll + CLI |
+| `storage-d1.ts` | Cloudflare D1 | Persists runs, markets, price/book/trade history |
+| `storage-local.ts` | `data/polymarket/` | Local JSON snapshots for CLI workflows |
+
+The existing poll path still calls `fetchPolymarketMarkets()` and produces legacy raw rows for cross-venue matching, but each poll now also stores richer Polymarket snapshots in D1.
+
+### Environment variables
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `POLYMARKET_GAMMA_URL` | `https://gamma-api.polymarket.com` | Discovery |
+| `POLYMARKET_CLOB_URL` | `https://clob.polymarket.com` | Prices + books |
+| `POLYMARKET_CLOB_WS_URL` | `wss://ws-subscriptions-clob.polymarket.com/ws/market` | CLI streaming |
+| `POLYMARKET_DATA_API_URL` | `https://data-api.polymarket.com` | Trades backfill |
+| `POLYMARKET_MAX_MARKETS` | `100` | Max markets per poll/snapshot |
+| `POLYMARKET_MAX_GAMMA_PAGES` | `2` | Gamma pagination cap (Workers-safe) |
+| `POLYMARKET_CLOB_ENRICH_MAX` | `100` | Max markets enriched via CLOB batch prices |
+| `POLYMARKET_RATE_LIMIT_MS` | `100` | Minimum interval between outbound requests |
+| `POLYGON_RPC_URL` | _(unset)_ | Optional; on-chain lookups are stubbed in v1 |
+
+### CLI examples
+
+```bash
+npm install
+npm run polymarket -- discover --limit 100
+npm run polymarket -- snapshot --active-only
+npm run polymarket -- stream --market-id fed-cut-sep-2026 --duration-ms 15000
+npm run polymarket -- backfill-trades --since 2026-06-01
+npm run polymarket -- inspect-market fed-cut-sep-2026
+```
+
+Local CLI snapshots are written to `data/polymarket/snapshot-<run-id>.json` with a rolling `ingestion-runs.jsonl` index.
+
+### Stored schemas
+
+Each poll/CLI run can persist:
+
+- `poly_ingestion_runs`
+- `poly_markets`
+- `poly_price_snapshots`
+- `poly_order_book_snapshots`
+- `poly_trades`
+
+Tables are auto-created by `ensureTables()`; optional migration: `npm run db:remote:polymarket`.
+
+---
+
 ## Free-tier limits to watch
 
 | Service | Free tier (approx.) | This project's usage |
@@ -212,6 +269,8 @@ Polling + D1 should stay **$0/month** at this scale.
 
 ```
 src/                        # TypeScript cloud engine
+src/polymarket/             # Polymarket discovery, CLOB, snapshot, storage modules
+scripts/polymarket-cli.ts   # Local Polymarket ingestion CLI
 functions/
   [[path]].ts               # Pages API handler (routes to Hono app)
 public/                     # Dashboard static files

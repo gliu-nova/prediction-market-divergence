@@ -1,3 +1,4 @@
+import { polyIngestionTableStatements } from "./polymarket/storage-d1";
 import type { AppConfig, HealthStatus, MarketObservation, MatchedPair, Opportunity, Signal } from "./types";
 
 const ALIGNMENT_TOLERANCE_MS = 5 * 60 * 1000;
@@ -83,6 +84,7 @@ export async function ensureTables(db: D1Database): Promise<void> {
     db.prepare(
       "CREATE INDEX IF NOT EXISTS idx_kalshi_normalized_poll_ts ON kalshi_normalized_markets(poll_ts)",
     ),
+    ...polyIngestionTableStatements.map((sql) => db.prepare(sql)),
   ]);
 }
 

@@ -12,6 +12,21 @@ export interface Env {
   POLL_SECRET?: string;
   KALSHI_ACCESS_KEY?: string;
   KALSHI_PRIVATE_KEY?: string;
+  POLYMARKET_GAMMA_URL?: string;
+  POLYMARKET_CLOB_URL?: string;
+  POLYMARKET_CLOB_WS_URL?: string;
+  POLYMARKET_DATA_API_URL?: string;
+  POLYMARKET_PAGE_SIZE?: string;
+  POLYMARKET_MAX_MARKETS?: string;
+  POLYMARKET_MAX_GAMMA_PAGES?: string;
+  POLYMARKET_CLOB_ENRICH_MAX?: string;
+  POLYMARKET_ORDER_BOOK_DEPTH?: string;
+  POLYMARKET_MAX_RETRIES?: string;
+  POLYMARKET_RETRY_BASE_MS?: string;
+  POLYMARKET_RATE_LIMIT_MS?: string;
+  POLYMARKET_STALE_MS?: string;
+  POLYMARKET_TRADE_LIMIT?: string;
+  POLYGON_RPC_URL?: string;
 }
 
 export interface MarketSide {

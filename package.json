@@ -9,7 +9,9 @@
   "scripts": {
     "db:remote": "wrangler d1 execute prediction-market-divergence --remote --file=./migrations/0001_init.sql",
     "db:remote:kalshi": "wrangler d1 execute prediction-market-divergence --remote --file=./migrations/0002_kalshi_ingestion.sql",
-    "test": "node --experimental-strip-types --test src/sources/kalshi.test.ts src/sources/kalshi-auth.test.ts src/kalshi-ingest.test.ts",
+    "test": "node --experimental-strip-types --test src/sources/kalshi.test.ts src/sources/kalshi-auth.test.ts src/kalshi-ingest.test.ts src/polymarket/*.test.ts",
+    "db:remote:polymarket": "wrangler d1 execute prediction-market-divergence --remote --file=./migrations/0003_polymarket_ingestion.sql",
+    "polymarket": "node --experimental-strip-types scripts/polymarket-cli.ts",
     "deploy": "wrangler pages deploy public --project-name=prediction-market-divergence"
   },
   "dependencies": {
@@ -17,7 +19,9 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260624.1",
+    "@types/ws": "^8.18.1",
     "typescript": "^5.9.3",
-    "wrangler": "^4.104.0"
+    "wrangler": "^4.104.0",
+    "ws": "^8.18.3"
   }
 }
