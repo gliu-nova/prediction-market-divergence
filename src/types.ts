@@ -1,5 +1,6 @@
 export interface Env {
   DB: D1Database;
+  HISTORY?: R2Bucket;
   ASSETS: Fetcher;
   ENVIRONMENT?: string;
   APP_NAME?: string;

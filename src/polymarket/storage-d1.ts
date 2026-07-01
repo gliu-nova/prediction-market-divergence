@@ -1,5 +1,6 @@
 import type { PolymarketSnapshotResult } from "./types.ts";
 
+/** Persists live Polymarket state in D1. Historical detail goes to R2 via history-r2.ts. */
 export async function savePolymarketSnapshotD1(db: D1Database, result: PolymarketSnapshotResult): Promise<void> {
   const statements: D1PreparedStatement[] = [
     db
@@ -76,79 +77,6 @@ export async function savePolymarketSnapshotD1(db: D1Database, result: Polymarke
           market.sourceUpdatedAt,
           market.url,
           new Date().toISOString(),
-        ),
-    );
-  }
-
-  for (const snap of result.priceSnapshots) {
-    statements.push(
-      db
-        .prepare(
-          `INSERT INTO poly_price_snapshots
-           (run_id, market_id, token_id, best_bid, best_ask, mid, spread, last_trade_price, source, source_timestamp, ingested_at, stale_age_ms)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(
-          result.run.id,
-          snap.marketId,
-          snap.tokenId,
-          snap.bestBid,
-          snap.bestAsk,
-          snap.mid,
-          snap.spread,
-          snap.lastTradePrice,
-          snap.source,
-          snap.sourceTimestamp,
-          snap.ingestedAt,
-          snap.staleAgeMs,
-        ),
-    );
-  }
-
-  for (const book of result.orderBooks) {
-    statements.push(
-      db
-        .prepare(
-          `INSERT INTO poly_order_book_snapshots
-           (run_id, market_id, token_id, last_trade_price, source_timestamp, ingested_at, bids_json, asks_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(
-          result.run.id,
-          book.marketId,
-          book.tokenId,
-          book.lastTradePrice,
-          book.sourceTimestamp,
-          book.ingestedAt,
-          JSON.stringify(book.bids),
-          JSON.stringify(book.asks),
-        ),
-    );
-  }
-
-  for (const trade of result.trades) {
-    statements.push(
-      db
-        .prepare(
-          `INSERT OR IGNORE INTO poly_trades
-           (id, run_id, market_id, condition_id, token_id, side, price, size, outcome, trader_name, transaction_hash, traded_at, ingested_at, source)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(
-          trade.id,
-          result.run.id,
-          trade.marketId,
-          trade.conditionId,
-          trade.tokenId,
-          trade.side,
-          trade.price,
-          trade.size,
-          trade.outcome,
-          trade.traderName,
-          trade.transactionHash,
-          trade.tradedAt,
-          trade.ingestedAt,
-          trade.source,
         ),
     );
   }
