@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { runD1Cleanup } from "./cleanup-d1";
 import { loadConfig } from "./config";
 import { runPoll } from "./poll";
 import { kalshiAuthStatus } from "./sources/kalshi";
@@ -110,6 +111,22 @@ app.get("/opportunities/:id", async (c) => {
     min_volume: Math.min(signal.market_a.volume ?? 0, signal.market_b?.volume ?? 0),
   };
   return c.json(opportunityPayload(opp));
+});
+
+app.post("/maintenance/cleanup", async (c) => {
+  const secret = c.env.POLL_SECRET;
+  if (secret) {
+    const auth = c.req.header("Authorization") ?? "";
+    if (auth !== `Bearer ${secret}`) return c.json({ detail: "Unauthorized" }, 401);
+  }
+  try {
+    const config = loadConfig(c.env);
+    const result = await runD1Cleanup(c.env.DB, config.observationRetentionDays);
+    return c.json({ status: "ok", ...result });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return c.json({ status: "error", detail }, 500);
+  }
 });
 
 app.post("/poll", async (c) => {

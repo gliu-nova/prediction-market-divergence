@@ -1,3 +1,4 @@
+import { runD1DailyCleanupIfDue } from "./cleanup-d1";
 import { loadConfig } from "./config";
 import { detectCrossVenue } from "./divergence";
 import { matchCrossVenue } from "./matcher";
@@ -47,6 +48,7 @@ export async function runPoll(env: Env): Promise<PollResult> {
 
   try {
     await ensureTables(env.DB);
+    await runD1DailyCleanupIfDue(env.DB, config.observationRetentionDays);
 
     let kalshiRaw: Record<string, unknown>[] = [];
     let polyRaw: Record<string, unknown>[] = [];

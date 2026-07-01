@@ -12,6 +12,7 @@
     "test": "node --experimental-strip-types --test src/sources/kalshi.test.ts src/sources/kalshi-auth.test.ts src/kalshi-ingest.test.ts src/polymarket/*.test.ts",
     "db:remote:polymarket": "wrangler d1 execute prediction-market-divergence --remote --file=./migrations/0003_polymarket_ingestion.sql",
     "db:purge-history": "wrangler d1 execute prediction-market-divergence --remote --file=./migrations/0004_purge_d1_history.sql",
+    "db:cleanup": "wrangler d1 execute prediction-market-divergence --remote --file=./migrations/0005_daily_cleanup.sql",
     "r2:create-history": "wrangler r2 bucket create prediction-market-divergence-history",
     "polymarket": "node --experimental-strip-types scripts/polymarket-cli.ts",
     "deploy": "wrangler pages deploy public --project-name=prediction-market-divergence"
