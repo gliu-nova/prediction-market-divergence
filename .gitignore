@@ -2,6 +2,7 @@
 node_modules/
 .dev.vars
 .wrangler/
+_worker.bundle
 __pycache__/
 *.pyc
 .env
