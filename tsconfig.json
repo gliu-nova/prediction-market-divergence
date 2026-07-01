@@ -7,6 +7,7 @@
     "skipLibCheck": true,
     "types": ["@cloudflare/workers-types"],
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "lib": ["ES2022"]
   },
   "include": ["src/**/*", "functions/**/*"]
