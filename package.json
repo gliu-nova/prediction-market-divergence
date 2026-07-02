@@ -9,7 +9,7 @@
   "scripts": {
     "db:remote": "wrangler d1 execute prediction-market-divergence --remote --file=./migrations/0001_init.sql",
     "db:remote:kalshi": "wrangler d1 execute prediction-market-divergence --remote --file=./migrations/0002_kalshi_ingestion.sql",
-    "test": "node --experimental-strip-types --test src/sources/kalshi.test.ts src/sources/kalshi-auth.test.ts src/kalshi-ingest.test.ts src/polymarket/*.test.ts",
+    "test": "node --experimental-strip-types --test src/sources/kalshi.test.ts src/sources/kalshi-auth.test.ts src/kalshi-ingest.test.ts src/d1/tiered.test.ts src/polymarket/*.test.ts",
     "db:remote:polymarket": "wrangler d1 execute prediction-market-divergence --remote --file=./migrations/0003_polymarket_ingestion.sql",
     "db:purge-history": "wrangler d1 execute prediction-market-divergence --remote --file=./migrations/0004_purge_d1_history.sql",
     "db:cleanup": "wrangler d1 execute prediction-market-divergence --remote --file=./migrations/0005_daily_cleanup.sql",

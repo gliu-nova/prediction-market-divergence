@@ -2,8 +2,12 @@ import type { CanonicalMarket, MatchedPair, Signal } from "../types.ts";
 
 const MAX_D1_TEXT_BYTES = 2000;
 const BATCH_CHUNK = 40;
+/** Cloudflare D1 allows at most 100 bound parameters per statement. */
+export const D1_MAX_BOUND_PARAMS = 100;
+/** Placeholders per row in runMultiRowLatestPriceUpserts value clause. */
+export const LATEST_PRICE_PARAMS_PER_ROW = 8;
 /** Fewer D1 subrequests: one INSERT per chunk instead of one per row. */
-const MULTI_ROW_CHUNK = 25;
+export const LATEST_PRICE_MULTI_ROW_CHUNK = Math.floor(D1_MAX_BOUND_PARAMS / LATEST_PRICE_PARAMS_PER_ROW);
 
 export type MarketKey = `${string}:${string}`;
 
@@ -162,8 +166,7 @@ const LATEST_PRICE_UPSERT_SUFFIX = `
    ingest_ts = excluded.ingest_ts`;
 
 function latestPriceRowBinds(m: CanonicalMarket, ingestTs: string): unknown[] {
-  const spread = m.probability != null ? null : null;
-  return [m.venue, m.market_id, m.probability, m.volume, m.liquidity, spread, m.observed_at, ingestTs];
+  return [m.venue, m.market_id, m.probability, m.volume, m.liquidity, null, m.observed_at, ingestTs];
 }
 
 async function runMultiRowLatestPriceUpserts(
@@ -172,8 +175,8 @@ async function runMultiRowLatestPriceUpserts(
   ingestTs: string,
 ): Promise<void> {
   if (!markets.length) return;
-  for (let i = 0; i < markets.length; i += MULTI_ROW_CHUNK) {
-    const chunk = markets.slice(i, i + MULTI_ROW_CHUNK);
+  for (let i = 0; i < markets.length; i += LATEST_PRICE_MULTI_ROW_CHUNK) {
+    const chunk = markets.slice(i, i + LATEST_PRICE_MULTI_ROW_CHUNK);
     const valueClause = chunk.map(() => "(?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)").join(", ");
     const binds = chunk.flatMap((m) => latestPriceRowBinds(m, ingestTs));
     await db
