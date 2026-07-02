@@ -15,7 +15,12 @@ function marketsKey(source: ArchiveSource, ts: string): string {
 function orderbookKey(marketId: string, ts: string): string {
   const { day } = partitionFromTs(ts);
   const safeId = marketId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 120);
-  return `polymarket/orderbooks/${day}/${safeId}.jsonl.gz`;
+  return `polymarket/orderbooks/by-market/${day}/${safeId}.jsonl.gz`;
+}
+
+function orderbooksBatchKey(ts: string): string {
+  const { day, hour } = partitionFromTs(ts);
+  return `polymarket/orderbooks/${day}/${hour}.jsonl.gz`;
 }
 
 async function gzipText(text: string): Promise<Uint8Array> {
@@ -112,21 +117,20 @@ export async function archivePolymarketOrderbooks(
   snapshot: PolymarketSnapshotResult | null,
 ): Promise<string[]> {
   if (!bucket || !snapshot?.orderBooks?.length) return [];
-  const keys: string[] = [];
-  for (const book of snapshot.orderBooks) {
-    const key = orderbookKey(book.marketId, ingestTs);
-    await appendJsonlGz(bucket, key, {
-      ingest_ts: ingestTs,
+  const key = orderbooksBatchKey(ingestTs);
+  await appendJsonlGz(bucket, key, {
+    ingest_ts: ingestTs,
+    book_count: snapshot.orderBooks.length,
+    order_books: snapshot.orderBooks.map((book) => ({
       market_id: book.marketId,
       token_id: book.tokenId,
       bids: book.bids,
       asks: book.asks,
       last_trade_price: book.lastTradePrice,
       source_timestamp: book.sourceTimestamp,
-    });
-    keys.push(key);
-  }
-  return keys;
+    })),
+  });
+  return [key];
 }
 
 export async function archiveDetectSnapshot(

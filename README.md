@@ -12,18 +12,48 @@ Cross-venue prediction market signal engine (Kalshi ↔ Polymarket). Detects pro
 
 The live bot path reads **D1 only** — never R2 or DuckDB directly.
 
-### Scheduled jobs (GitHub Actions)
+### GitHub Actions workflows
 
-| Job | Schedule | Endpoint / command |
-|-----|----------|---------------------|
-| Market discovery | Every 4h | `POST /jobs/discover` |
-| Snapshot ingestion | Every 15 min | `POST /jobs/ingest` |
-| Opportunity detection | Every 15 min | `POST /jobs/detect` |
-| D1 summarization | Every 12h | `POST /jobs/summarize` |
-| R2 → DuckDB → D1 | Daily 06:30 UTC | `research/pm.py run-daily` |
-| D1 retention cleanup | Daily midnight UTC | `POST /maintenance/cleanup` |
+Five workflows run on a **cron schedule**; deploy is **event-driven** (not scheduled).
 
-`POST /poll` remains as a backward-compatible shortcut (ingest + detect).
+| Workflow | Schedule (UTC) | Cron | Trigger |
+|----------|----------------|------|---------|
+| **Scheduled Ingest and Detect** | Every 30 min | `*/30 * * * *` | `POST /jobs/ingest` then `POST /jobs/detect` |
+| **Market Discovery** | Every 4h at :00 | `0 */4 * * *` | `POST /jobs/discover` |
+| **Summarize Indicators** | Every 12h at :00 | `0 */12 * * *` | `POST /jobs/summarize` |
+| **Daily R2 DuckDB Research** | Daily 06:30 | `30 6 * * *` | `research/pm.py run-daily` |
+| **Daily D1 Cleanup** | Daily 00:00 | `0 0 * * *` | `POST /maintenance/cleanup` |
+| **Deploy to Cloudflare Pages** | On push to `main` | — | `wrangler pages deploy` |
+
+All scheduled workflows also support **workflow_dispatch** (manual run from GitHub Actions).
+
+`POST /poll` remains a backward-compatible shortcut (ingest + detect in one request).
+
+#### Pipeline order (logical dependencies)
+
+Jobs are independent cron triggers — GitHub does not chain them. This is the order they **should** run in for correct data flow:
+
+```
+1. Deploy (on push)          → code live on Pages
+2. Discover                  → D1 markets metadata (titles, match keys)
+3. Ingest                    → R2 archives + D1 latest_prices
+4. Detect                    → D1 signals + opportunity_events (runs immediately after ingest in poll.yml)
+5. Summarize                 → D1 poll_state rollups / freshness checks
+6. Research (R2 → DuckDB)    → D1 indicator_summaries (feeds detect scoring)
+7. Cleanup                   → prune old D1 rows (after UTC midnight quota reset)
+```
+
+**Typical UTC day:**
+
+| Time | What runs |
+|------|-----------|
+| 00:00 | Cleanup + Summarize |
+| 00:00, 04:00, 08:00, 12:00, 16:00, 20:00 | Discover |
+| Every :00 and :30 | Ingest + Detect |
+| 06:30 | R2 → DuckDB → D1 research |
+| 12:00 | Summarize |
+
+Discover can lag ingest by up to 4h for brand-new markets; prices still update every 30 min for markets already in D1.
 
 ```
 API fetch → R2 (raw JSONL.gz) + D1 (latest_prices, markets)
@@ -129,13 +159,13 @@ Repo → **Settings → Secrets and variables → Actions**:
 
 Token needs **Cloudflare Pages Edit** + **D1 Edit**.
 
-### 5. Scheduled polling (GitHub Actions)
+### 5. Scheduled jobs (GitHub Actions)
 
-Cloudflare **Pages does not support Cron Triggers**. Polling is handled by `.github/workflows/poll.yml`, which runs every 15 minutes and calls `POST /poll` on your deployed Pages URL.
+Cloudflare **Pages does not support Cron Triggers**. Ingest + detect are handled by `.github/workflows/poll.yml` (every **30 minutes** UTC).
 
-1. Confirm the workflow exists: **GitHub → Actions → Scheduled Poll**
+1. Confirm workflows exist under **GitHub → Actions** (see schedule table above)
 2. After the first scheduled run, verify `last_poll_at` advances on `/health`
-3. Manual trigger: **Actions → Scheduled Poll → Run workflow**
+3. Manual trigger: **Actions → Scheduled Ingest and Detect → Run workflow**
 
 If you see **"Failed to find worker prediction-market-divergence"** in the Cloudflare dashboard, ignore it — this project is a **Pages** app, not a Worker. You do not need to create or regenerate a Worker unless you intentionally migrate polling to Workers cron.
 
@@ -162,7 +192,7 @@ Live URLs:
 ## Verify cloud polling
 
 ```bash
-# Health — check last_poll_at updates every ~15 minutes
+# Health — check last_poll_at updates every ~30 minutes
 curl -s https://prediction-market-divergence.pages.dev/health | jq
 
 # Manual poll (if POLL_SECRET set, add header)
@@ -174,7 +204,7 @@ curl -s "https://prediction-market-divergence.pages.dev/opportunities?min_score=
 
 **Healthy signals:**
 
-- `last_poll_at` advances every 15 minutes
+- `last_poll_at` advances every 30 minutes
 - `sources.mode` is `live` (or `mock` if configured)
 - `sources.runtime` is `cloudflare-pages`
 - `status` is `ok` (or `degraded` if last poll errored — check logs)
@@ -294,7 +324,7 @@ Migration: `npm run db:remote:tiered`. Tables are also auto-created by `ensureTa
 | Service | Free tier (approx.) | This project's usage |
 |---------|---------------------|----------------------|
 | Cloudflare Pages | 500 builds/month, unlimited requests | 1 deploy per push; API reads low |
-| Cloudflare Pages Functions | 100k requests/day | ~96 poll POSTs/day + API traffic |
+| Cloudflare Pages Functions | 100k requests/day | ~96 job POSTs/day (48 ingest + 48 detect) + API traffic |
 | Cloudflare D1 | 5M rows read/day, 100k writes/day | Compact live rows only |
 | Cloudflare R2 | 10 GB storage free | Raw JSONL.gz archives |
 | GitHub Actions | 2000 min/month (private repos) | Deploy + ingest/detect/discover/summarize/research |
@@ -319,7 +349,7 @@ migrations/                 # D1 schema
 wrangler.toml               # D1 + R2 bindings
 .github/workflows/
   deploy.yml                # Deploy on push to main
-  poll.yml                  # Ingest + detect every 15 min
+  poll.yml                  # Ingest + detect every 30 min
   discover.yml              # Market discovery every 4h
   summarize.yml             # D1 rollup every 12h
   research-daily.yml          # R2 → DuckDB → D1 daily

@@ -3,7 +3,7 @@ import { loadLatestPricesMarkets, maxGapsFromIndicators, recordOpportunityEvents
 import { loadConfig } from "../config.ts";
 import { detectCrossVenueWithKeys } from "../divergence.ts";
 import { matchCrossVenue } from "../matcher.ts";
-import { ensureTables, maxHistoricalGapsForPairs, recordPollResult, syncActiveSignals } from "../storage.ts";
+import { ensureTables, maxHistoricalGapsForPairs, recordDetectResult, syncActiveSignals } from "../storage.ts";
 import type { Env } from "../types.ts";
 
 export interface DetectResult {
@@ -33,15 +33,9 @@ export async function runDetectOpportunities(env: Env): Promise<DetectResult> {
   await archiveDetectSnapshot(env.HISTORY, detectTs, pairs, signals.length);
   await setJobState(env.DB, "last_detect_at", detectTs);
 
-  const kalshiMarkets = markets.filter((m) => m.venue === "kalshi").length;
-  const polymarketMarkets = markets.filter((m) => m.venue === "polymarket").length;
-
-  await recordPollResult(env.DB, {
-    markets: markets.length,
+  await recordDetectResult(env.DB, {
     pairs: pairs.length,
     opportunities: signals.length,
-    kalshi_markets: kalshiMarkets,
-    polymarket_markets: polymarketMarkets,
   });
 
   return {

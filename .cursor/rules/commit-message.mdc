@@ -1,0 +1,20 @@
+---
+description: Generate a commit message after code changes
+alwaysApply: true
+---
+
+After completing any code-editing task, include a "Suggested commit message" section.
+
+The commit message should:
+- Be based only on the actual diff made in this task.
+- Use Conventional Commits format when possible:
+  - feat: for new user-facing functionality
+  - fix: for bug fixes
+  - refactor: for internal restructuring without behavior change
+  - chore: for tooling, config, dependencies, or maintenance
+  - docs: for documentation-only changes
+  - test: for tests
+  - perf: for performance improvements
+- Be concise but specific.
+- Prefer one-line commit messages unless the change is large enough to need a body.
+- Do not create the git commit unless explicitly asked.

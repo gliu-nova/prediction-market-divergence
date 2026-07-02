@@ -71,6 +71,24 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - Keep functions small and focused.
 - Prefer modern, clean Python idioms.
 
+## Git & Commit Workflow
+
+After any code change or refactor you perform:
+- Always generate a concise, high-quality conventional commit message.
+- Follow Conventional Commits format: `<type>(<scope>): <description>`
+  - Types: feat, fix, refactor, docs, chore, test, style, perf, ci, build, etc.
+- Keep the subject line under 72 characters.
+- Include a short body if the change is complex (what + why).
+- Output the commit message clearly at the end of your response, e.g.:
+
+```commit
+refactor(pipeline): migrate raw storage to tiered R2 + DuckDB architecture
+
+- Moved historical snapshots to partitioned JSONL/Parquet in R2
+- Updated D1 tables to only hold compact serving data
+- Added build_features and backtest_opportunities batch jobs
+- Preserved all existing live bot behavior
+
 ## Final Response Marker
 **Every time you have fully completed the entire user request, end your final response with exactly:**
 

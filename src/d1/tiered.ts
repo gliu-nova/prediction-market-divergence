@@ -2,6 +2,14 @@ import type { CanonicalMarket, MatchedPair, Signal } from "../types.ts";
 
 const MAX_D1_TEXT_BYTES = 2000;
 const BATCH_CHUNK = 40;
+/** Fewer D1 subrequests: one INSERT per chunk instead of one per row. */
+const MULTI_ROW_CHUNK = 25;
+
+export type MarketKey = `${string}:${string}`;
+
+export function marketKey(venue: string, marketId: string): MarketKey {
+  return `${venue}:${marketId}`;
+}
 
 function truncate(value: string, maxBytes = MAX_D1_TEXT_BYTES): string {
   const encoder = new TextEncoder();
@@ -15,6 +23,22 @@ async function runBatches(db: D1Database, statements: D1PreparedStatement[]): Pr
   for (let i = 0; i < statements.length; i += BATCH_CHUNK) {
     await db.batch(statements.slice(i, i + BATCH_CHUNK));
   }
+}
+
+export async function loadActiveMarketKeys(db: D1Database): Promise<Set<MarketKey>> {
+  const rows = await db
+    .prepare("SELECT venue, market_id FROM markets WHERE active = 1")
+    .all<{ venue: string; market_id: string }>();
+  const keys = new Set<MarketKey>();
+  for (const row of rows.results ?? []) {
+    keys.add(marketKey(row.venue, row.market_id));
+  }
+  return keys;
+}
+
+export function filterMarketsToTracked(markets: CanonicalMarket[], tracked: Set<MarketKey>): CanonicalMarket[] {
+  if (!tracked.size) return markets;
+  return markets.filter((m) => tracked.has(marketKey(m.venue, m.market_id)));
 }
 
 export const tieredTableStatements = [
@@ -128,26 +152,39 @@ export async function upsertMarkets(db: D1Database, markets: CanonicalMarket[], 
 const PROB_CHANGE_EPS = 0.0005;
 const NUM_CHANGE_EPS = 0.01;
 
-function latestPriceUpsertStatement(
-  db: D1Database,
-  m: CanonicalMarket,
-  ingestTs: string,
-): D1PreparedStatement {
+const LATEST_PRICE_UPSERT_SUFFIX = `
+ ON CONFLICT(venue, market_id) DO UPDATE SET
+   probability = excluded.probability,
+   volume = excluded.volume,
+   liquidity = excluded.liquidity,
+   spread = excluded.spread,
+   observed_at = excluded.observed_at,
+   ingest_ts = excluded.ingest_ts`;
+
+function latestPriceRowBinds(m: CanonicalMarket, ingestTs: string): unknown[] {
   const spread = m.probability != null ? null : null;
-  return db
-    .prepare(
-      `INSERT INTO latest_prices
-       (venue, market_id, probability, volume, liquidity, best_bid, best_ask, spread, observed_at, ingest_ts)
-       VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)
-       ON CONFLICT(venue, market_id) DO UPDATE SET
-         probability = excluded.probability,
-         volume = excluded.volume,
-         liquidity = excluded.liquidity,
-         spread = excluded.spread,
-         observed_at = excluded.observed_at,
-         ingest_ts = excluded.ingest_ts`,
-    )
-    .bind(m.venue, m.market_id, m.probability, m.volume, m.liquidity, spread, m.observed_at, ingestTs);
+  return [m.venue, m.market_id, m.probability, m.volume, m.liquidity, spread, m.observed_at, ingestTs];
+}
+
+async function runMultiRowLatestPriceUpserts(
+  db: D1Database,
+  markets: CanonicalMarket[],
+  ingestTs: string,
+): Promise<void> {
+  if (!markets.length) return;
+  for (let i = 0; i < markets.length; i += MULTI_ROW_CHUNK) {
+    const chunk = markets.slice(i, i + MULTI_ROW_CHUNK);
+    const valueClause = chunk.map(() => "(?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)").join(", ");
+    const binds = chunk.flatMap((m) => latestPriceRowBinds(m, ingestTs));
+    await db
+      .prepare(
+        `INSERT INTO latest_prices
+         (venue, market_id, probability, volume, liquidity, best_bid, best_ask, spread, observed_at, ingest_ts)
+         VALUES ${valueClause}${LATEST_PRICE_UPSERT_SUFFIX}`,
+      )
+      .bind(...binds)
+      .run();
+  }
 }
 
 function latestPriceChanged(
@@ -167,8 +204,7 @@ export async function upsertLatestPrices(
   ingestTs: string,
 ): Promise<number> {
   if (!markets.length) return 0;
-  const statements = markets.map((m) => latestPriceUpsertStatement(db, m, ingestTs));
-  await runBatches(db, statements);
+  await runMultiRowLatestPriceUpserts(db, markets, ingestTs);
   return markets.length;
 }
 
@@ -191,22 +227,22 @@ export async function upsertLatestPricesIfChanged(
       liquidity: number | null;
     }>();
   for (const row of rows.results ?? []) {
-    existing.set(`${row.venue}:${row.market_id}`, row);
+    existing.set(marketKey(row.venue, row.market_id), row);
   }
 
-  const statements: D1PreparedStatement[] = [];
+  const toWrite: CanonicalMarket[] = [];
   let skipped = 0;
   for (const market of markets) {
-    const prior = existing.get(`${market.venue}:${market.market_id}`);
+    const prior = existing.get(marketKey(market.venue, market.market_id));
     if (!latestPriceChanged(prior, market)) {
       skipped += 1;
       continue;
     }
-    statements.push(latestPriceUpsertStatement(db, market, ingestTs));
+    toWrite.push(market);
   }
 
-  await runBatches(db, statements);
-  return { written: statements.length, skipped };
+  await runMultiRowLatestPriceUpserts(db, toWrite, ingestTs);
+  return { written: toWrite.length, skipped };
 }
 
 export async function loadLatestPricesMarkets(db: D1Database): Promise<CanonicalMarket[]> {

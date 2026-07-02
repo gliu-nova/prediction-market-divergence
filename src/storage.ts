@@ -580,35 +580,56 @@ export async function recordIngestStats(
   db: D1Database,
   ingestTs: string,
   result: {
-    markets: number;
-    pairs: number;
-    kalshi_markets: number;
-    polymarket_markets: number;
+    markets?: number;
+    pairs?: number;
+    kalshi_markets?: number;
+    polymarket_markets?: number;
     prices_written?: number;
     poly_markets_enriched?: number | null;
     poly_snapshots_stored?: number | null;
   },
 ): Promise<void> {
-  const statements = [
+  const statements: D1PreparedStatement[] = [
     db
       .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
       .bind("last_ingestion_snapshot_ts", ingestTs),
-    db
-      .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
-      .bind("last_markets_ingested", String(result.markets)),
-    db
-      .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
-      .bind("last_pairs_matched", String(result.pairs)),
-    db
-      .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
-      .bind("last_kalshi_markets", String(result.kalshi_markets)),
-    db
-      .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
-      .bind("last_polymarket_markets", String(result.polymarket_markets)),
-    db
-      .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
-      .bind("last_prices_written", String(result.prices_written ?? 0)),
   ];
+
+  if (result.markets != null) {
+    statements.push(
+      db
+        .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+        .bind("last_markets_ingested", String(result.markets)),
+    );
+  }
+  if (result.pairs != null) {
+    statements.push(
+      db
+        .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+        .bind("last_pairs_matched", String(result.pairs)),
+    );
+  }
+  if (result.kalshi_markets != null) {
+    statements.push(
+      db
+        .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+        .bind("last_kalshi_markets", String(result.kalshi_markets)),
+    );
+  }
+  if (result.polymarket_markets != null) {
+    statements.push(
+      db
+        .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+        .bind("last_polymarket_markets", String(result.polymarket_markets)),
+    );
+  }
+  if (result.prices_written != null) {
+    statements.push(
+      db
+        .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+        .bind("last_prices_written", String(result.prices_written)),
+    );
+  }
 
   if (result.poly_markets_enriched != null) {
     statements.push(
@@ -758,6 +779,31 @@ export async function listMatchedPairSnapshots(
     limit,
     pairs: matchedRows,
   };
+}
+
+export async function recordDetectResult(
+  db: D1Database,
+  result: {
+    opportunities: number;
+    pairs: number;
+    error?: string;
+  },
+): Promise<void> {
+  const now = new Date().toISOString();
+  await db.batch([
+    db
+      .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .bind("last_poll_at", now),
+    db
+      .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .bind("last_pairs_matched", String(result.pairs)),
+    db
+      .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .bind("last_opportunities_found", String(result.opportunities)),
+    db
+      .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .bind("last_error", result.error ?? ""),
+  ]);
 }
 
 export async function recordPollResult(
