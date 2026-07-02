@@ -1,17 +1,5 @@
 # AGENTS.md - Grok Build Instructions
 
-## Project Overview
-Cloudflare Pages service (TypeScript + D1 + R2) that ingests prediction market data (Polymarket, Kalshi), normalizes and matches markets across venues, detects divergences, and exposes ranked signals via Hono for the `twitter-bot` project to poll and tweet.
-
-**Tiered storage:** D1 for live compact state (`markets`, `latest_prices`, `signals`, `opportunity_events`, `indicator_summaries`, `cooldowns`); R2 for raw JSONL.gz archives; local DuckDB (`research/pm.py`) for heavy analytics that writes compact summaries back to D1. The live bot never reads R2 or DuckDB.
-
-**Jobs:** discover (4h) → `POST /jobs/discover`; ingest (15m) → `POST /jobs/ingest`; detect (15m) → `POST /jobs/detect`; summarize (12h) → `POST /jobs/summarize`; daily research → `research/pm.py run-daily`. `POST /poll` = ingest + detect. Deploy: GitHub Actions → `wrangler pages deploy`.
-
-## Signal Output Format
-Signals must be structured JSON that `twitter-bot` can turn into scannable tweets. Include: title, venue prices, difference, score, URLs, tweet_hint, timestamps.
-
-**Tweet hints:** Professional, data-driven. Numbers lead; context follows. No Twitter posting from this service.
-
 ## Core Coding Principles
 
 ### 1. Think Before Coding
@@ -70,6 +58,20 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - Add minimal but helpful comments only where logic is non-obvious.
 - Keep functions small and focused.
 - Prefer modern, clean Python idioms.
+
+## Testing & Reliability
+
+- Write or update tests for new/changed functionality (unit for core logic, integration for jobs/pipelines).
+- Use DuckDB for testing analytics queries where possible.
+- Make jobs idempotent and resumable.
+- Add input validation and graceful error handling with retries (especially for API polling and R2/D1 operations).
+- Prefer deterministic behavior and clear logging for debugging scheduled jobs.
+
+## Documentation
+
+- Update README.md or relevant docs when adding features, new CLI commands, or changing architecture.
+- Include usage examples for new CLI commands.
+- Keep architecture diagrams (text-based) up to date if present.
 
 ## Git & Commit Workflow
 
