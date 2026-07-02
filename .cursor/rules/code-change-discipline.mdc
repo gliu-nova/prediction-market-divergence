@@ -1,0 +1,13 @@
+---
+description: Code change discipline
+alwaysApply: true
+---
+
+Before editing code:
+- Inspect the relevant existing files first.
+- Prefer the smallest change that solves the task.
+- Do not rewrite unrelated code.
+- Do not introduce new dependencies unless there is a clear reason.
+- Preserve existing behavior unless the task explicitly asks to change it.
+- If a change affects data storage, migrations, environment variables, or scheduled jobs, call it out clearly after the edit.
+- After editing, summarize what changed and mention any tests or checks run.

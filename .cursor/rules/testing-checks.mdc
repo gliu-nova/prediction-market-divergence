@@ -1,0 +1,11 @@
+---
+description: Testing and validation
+alwaysApply: true
+---
+
+After code changes:
+- Run the narrowest relevant test/check when feasible.
+- Prefer targeted tests over full test suites unless the change is broad.
+- If tests cannot be run, explain why.
+- For data pipeline changes, validate with a small sample or dry-run mode where possible.
+- For schema changes, include migration/update notes.
