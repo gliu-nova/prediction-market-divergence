@@ -1,0 +1,106 @@
+name: Run Full Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      skip_discover:
+        description: "Skip discover (use if markets metadata is already fresh)"
+        type: boolean
+        default: false
+      skip_summarize:
+        description: "Skip summarize rollup"
+        type: boolean
+        default: false
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run discover → ingest → detect → summarize
+        env:
+          POLL_SECRET: ${{ secrets.POLL_SECRET }}
+          SKIP_DISCOVER: ${{ inputs.skip_discover }}
+          SKIP_SUMMARIZE: ${{ inputs.skip_summarize }}
+        run: |
+          set -euo pipefail
+          BASE="https://prediction-market-divergence.pages.dev"
+          AUTH=()
+          if [ -n "${POLL_SECRET:-}" ]; then
+            AUTH=(-H "Authorization: Bearer ${POLL_SECRET}")
+          fi
+
+          post_job() {
+            local name="$1"
+            local path="$2"
+            local outfile="/tmp/pmd-${name}.json"
+            local http
+            http=$(curl -sS -o "$outfile" -w "%{http_code}" -X POST "${AUTH[@]}" "$BASE$path")
+            echo "${name^} HTTP: $http"
+            cat "$outfile"
+            echo
+            if [ "$http" != "200" ]; then
+              echo "ERROR: POST $path returned HTTP $http"
+              exit 1
+            fi
+          }
+
+          if [ "${SKIP_DISCOVER}" != "true" ]; then
+            post_job discover /jobs/discover
+          else
+            echo "Skipping discover"
+            echo
+          fi
+
+          post_job ingest /jobs/ingest
+          post_job detect /jobs/detect
+
+          if [ "${SKIP_SUMMARIZE}" != "true" ]; then
+            post_job summarize /jobs/summarize
+          else
+            echo "Skipping summarize"
+            echo
+          fi
+
+          if [ "${SKIP_DISCOVER}" = "true" ]; then
+            echo 'null' > /tmp/pmd-discover.json
+          fi
+          if [ "${SKIP_SUMMARIZE}" = "true" ]; then
+            echo 'null' > /tmp/pmd-summarize.json
+          fi
+
+          jq -n \
+            --arg skip_discover "${SKIP_DISCOVER}" \
+            --arg skip_summarize "${SKIP_SUMMARIZE}" \
+            --slurpfile discover /tmp/pmd-discover.json \
+            --slurpfile ingest /tmp/pmd-ingest.json \
+            --slurpfile detect /tmp/pmd-detect.json \
+            --slurpfile summarize /tmp/pmd-summarize.json \
+            '{
+              status: "ok",
+              skip_discover: ($skip_discover == "true"),
+              skip_summarize: ($skip_summarize == "true"),
+              discover: (if $skip_discover == "true" then null else $discover[0] end),
+              ingest: $ingest[0],
+              detect: $detect[0],
+              summarize: (if $skip_summarize == "true" then null else $summarize[0] end)
+            }' > /tmp/pmd-pipeline.json
+          echo "Pipeline summary:"
+          cat /tmp/pmd-pipeline.json
+          echo
+
+          HEALTH_HTTP=$(curl -sS -o /tmp/pmd-health.json -w "%{http_code}" "$BASE/health")
+          echo "Health HTTP: $HEALTH_HTTP"
+          cat /tmp/pmd-health.json
+          echo
+
+          if [ "$HEALTH_HTTP" != "200" ]; then
+            echo "ERROR: /health returned HTTP $HEALTH_HTTP"
+            exit 1
+          fi
+
+          STATUS=$(jq -r '.status // "unknown"' /tmp/pmd-health.json)
+          LAST_ERROR=$(jq -r '.last_error // empty' /tmp/pmd-health.json)
+          echo "Health status: $STATUS"
+          if [ -n "$LAST_ERROR" ] && [ "$LAST_ERROR" != "null" ]; then
+            echo "Warning: last_poll_error=$LAST_ERROR"
+          fi

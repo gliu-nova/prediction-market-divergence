@@ -24,8 +24,9 @@ Five workflows run on a **cron schedule**; deploy is **event-driven** (not sched
 | **Daily R2 DuckDB Research** | Daily 06:30 | `30 6 * * *` | `research/pm.py run-daily` |
 | **Daily D1 Cleanup** | Daily 00:00 | `0 0 * * *` | `POST /maintenance/cleanup` |
 | **Deploy to Cloudflare Pages** | On push to `main` | — | `wrangler pages deploy` |
+| **Run Full Pipeline** | Manual only | — | discover → ingest → detect → summarize |
 
-All scheduled workflows also support **workflow_dispatch** (manual run from GitHub Actions).
+All scheduled workflows also support **workflow_dispatch** (manual run from GitHub Actions). Use **Run Full Pipeline** to chain the live-data jobs in order for setup, recovery, or debugging (excludes deploy, research, and cleanup).
 
 `POST /poll` remains a backward-compatible shortcut (ingest + detect in one request).
 
@@ -354,5 +355,6 @@ wrangler.toml               # D1 + R2 bindings
   summarize.yml             # D1 rollup every 12h
   research-daily.yml          # R2 → DuckDB → D1 daily
   cleanup.yml               # D1 retention daily
+  full-pipeline.yml         # Manual discover → ingest → detect → summarize
 scripts/deploy.sh
 ```
