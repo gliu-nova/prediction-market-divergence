@@ -125,32 +125,88 @@ export async function upsertMarkets(db: D1Database, markets: CanonicalMarket[], 
   return markets.length;
 }
 
+const PROB_CHANGE_EPS = 0.0005;
+const NUM_CHANGE_EPS = 0.01;
+
+function latestPriceUpsertStatement(
+  db: D1Database,
+  m: CanonicalMarket,
+  ingestTs: string,
+): D1PreparedStatement {
+  const spread = m.probability != null ? null : null;
+  return db
+    .prepare(
+      `INSERT INTO latest_prices
+       (venue, market_id, probability, volume, liquidity, best_bid, best_ask, spread, observed_at, ingest_ts)
+       VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)
+       ON CONFLICT(venue, market_id) DO UPDATE SET
+         probability = excluded.probability,
+         volume = excluded.volume,
+         liquidity = excluded.liquidity,
+         spread = excluded.spread,
+         observed_at = excluded.observed_at,
+         ingest_ts = excluded.ingest_ts`,
+    )
+    .bind(m.venue, m.market_id, m.probability, m.volume, m.liquidity, spread, m.observed_at, ingestTs);
+}
+
+function latestPriceChanged(
+  prior: { probability: number; volume: number | null; liquidity: number | null } | undefined,
+  market: CanonicalMarket,
+): boolean {
+  if (!prior) return true;
+  if (Math.abs(prior.probability - market.probability) >= PROB_CHANGE_EPS) return true;
+  if (Math.abs((prior.volume ?? 0) - (market.volume ?? 0)) >= NUM_CHANGE_EPS) return true;
+  if (Math.abs((prior.liquidity ?? 0) - (market.liquidity ?? 0)) >= NUM_CHANGE_EPS) return true;
+  return false;
+}
+
 export async function upsertLatestPrices(
   db: D1Database,
   markets: CanonicalMarket[],
   ingestTs: string,
 ): Promise<number> {
   if (!markets.length) return 0;
-  const statements = markets.map((m) => {
-    const spread =
-      m.probability != null ? null : null; // spread filled when bid/ask available from poly snapshot
-    return db
-      .prepare(
-        `INSERT INTO latest_prices
-         (venue, market_id, probability, volume, liquidity, best_bid, best_ask, spread, observed_at, ingest_ts)
-         VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)
-         ON CONFLICT(venue, market_id) DO UPDATE SET
-           probability = excluded.probability,
-           volume = excluded.volume,
-           liquidity = excluded.liquidity,
-           spread = excluded.spread,
-           observed_at = excluded.observed_at,
-           ingest_ts = excluded.ingest_ts`,
-      )
-      .bind(m.venue, m.market_id, m.probability, m.volume, m.liquidity, spread, m.observed_at, ingestTs);
-  });
+  const statements = markets.map((m) => latestPriceUpsertStatement(db, m, ingestTs));
   await runBatches(db, statements);
   return markets.length;
+}
+
+/** Write only rows whose price/volume/liquidity changed (or are new). */
+export async function upsertLatestPricesIfChanged(
+  db: D1Database,
+  markets: CanonicalMarket[],
+  ingestTs: string,
+): Promise<{ written: number; skipped: number }> {
+  if (!markets.length) return { written: 0, skipped: 0 };
+
+  const existing = new Map<string, { probability: number; volume: number | null; liquidity: number | null }>();
+  const rows = await db
+    .prepare("SELECT venue, market_id, probability, volume, liquidity FROM latest_prices")
+    .all<{
+      venue: string;
+      market_id: string;
+      probability: number;
+      volume: number | null;
+      liquidity: number | null;
+    }>();
+  for (const row of rows.results ?? []) {
+    existing.set(`${row.venue}:${row.market_id}`, row);
+  }
+
+  const statements: D1PreparedStatement[] = [];
+  let skipped = 0;
+  for (const market of markets) {
+    const prior = existing.get(`${market.venue}:${market.market_id}`);
+    if (!latestPriceChanged(prior, market)) {
+      skipped += 1;
+      continue;
+    }
+    statements.push(latestPriceUpsertStatement(db, market, ingestTs));
+  }
+
+  await runBatches(db, statements);
+  return { written: statements.length, skipped };
 }
 
 export async function loadLatestPricesMarkets(db: D1Database): Promise<CanonicalMarket[]> {

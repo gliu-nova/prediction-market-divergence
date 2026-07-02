@@ -2,7 +2,8 @@ name: Scheduled Ingest and Detect
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    # Stopgap: 30m interval while D1 free-tier write quota is tight (100k rows/day).
+    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 jobs:

@@ -1,4 +1,5 @@
-import { tieredTableStatements } from "./d1/tiered.ts";
+import { loadLatestPricesMarkets, tieredTableStatements } from "./d1/tiered.ts";
+import { matchCrossVenue } from "./matcher.ts";
 import { polyIngestionTableStatements } from "./polymarket/storage-d1";
 import type {
   AppConfig,
@@ -332,22 +333,45 @@ export async function maxHistoricalGap(
 }
 
 export async function syncActiveSignals(db: D1Database, signals: Signal[]): Promise<void> {
-  const upserts = signals.map((signal) =>
-    db
-      .prepare(
-        `INSERT INTO signals (id, type, payload, score, is_active, created_at)
-         VALUES (?, ?, ?, ?, 1, ?)
-         ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, score = excluded.score, is_active = 1, created_at = excluded.created_at`,
-      )
-      .bind(signal.id, signal.type, JSON.stringify(signal), signal.score, signal.created_at),
-  );
-
   const maxAgeCutoff = new Date(Date.now() - 24 * 3600000).toISOString();
-  await db.batch([
-    db.prepare("UPDATE signals SET is_active = 0 WHERE is_active = 1"),
+  const activeIds = new Set(signals.map((signal) => signal.id));
+  const statements: D1PreparedStatement[] = [
     db.prepare("DELETE FROM signals WHERE is_active = 0 AND created_at < ?").bind(maxAgeCutoff),
-  ]);
-  await runStatementBatches(db, upserts);
+  ];
+
+  if (!signals.length) {
+    const active = await db
+      .prepare("SELECT id FROM signals WHERE is_active = 1")
+      .all<{ id: string }>();
+    for (const row of active.results ?? []) {
+      statements.push(db.prepare("UPDATE signals SET is_active = 0 WHERE id = ?").bind(row.id));
+    }
+    await runStatementBatches(db, statements);
+    return;
+  }
+
+  const active = await db
+    .prepare("SELECT id FROM signals WHERE is_active = 1")
+    .all<{ id: string }>();
+  for (const row of active.results ?? []) {
+    if (!activeIds.has(row.id)) {
+      statements.push(db.prepare("UPDATE signals SET is_active = 0 WHERE id = ?").bind(row.id));
+    }
+  }
+
+  for (const signal of signals) {
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO signals (id, type, payload, score, is_active, created_at)
+           VALUES (?, ?, ?, ?, 1, ?)
+           ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, score = excluded.score, is_active = 1, created_at = excluded.created_at`,
+        )
+        .bind(signal.id, signal.type, JSON.stringify(signal), signal.score, signal.created_at),
+    );
+  }
+
+  await runStatementBatches(db, statements);
 }
 
 function parseSignal(row: { payload: string }): Signal {
@@ -422,62 +446,14 @@ export async function getSignalById(db: D1Database, id: string): Promise<Signal 
   return row ? parseSignal(row) : null;
 }
 
-async function countIngestedMarketsByVenue(
-  db: D1Database,
-  pollTs: string | null,
-): Promise<{ kalshi: number; polymarket: number }> {
-  if (!pollTs) {
-    return { kalshi: 0, polymarket: 0 };
-  }
-  const rows = await db
-    .prepare(
-      `SELECT venue, COUNT(*) AS c
-       FROM ingested_markets
-       WHERE poll_ts = ?
-       GROUP BY venue`,
-    )
-    .bind(pollTs)
-    .all<{ venue: string; c: number }>();
-  const counts = { kalshi: 0, polymarket: 0 };
-  for (const row of rows.results ?? []) {
-    if (row.venue === "kalshi") counts.kalshi = row.c;
-    if (row.venue === "polymarket") counts.polymarket = row.c;
-  }
-  return counts;
-}
-
-async function countPairsByVenue(
-  db: D1Database,
-  pollTs: string | null,
-): Promise<{ kalshi: number; polymarket: number }> {
-  if (!pollTs) {
-    return { kalshi: 0, polymarket: 0 };
-  }
-  const row = await db
-    .prepare("SELECT COUNT(*) AS c FROM matched_pair_snapshots WHERE poll_ts = ?")
-    .bind(pollTs)
-    .first<{ c: number }>();
-  const pairCount = row?.c ?? 0;
-  return { kalshi: pairCount, polymarket: pairCount };
-}
-
 async function latestPolymarketRunStats(
   db: D1Database,
 ): Promise<{ markets_enriched: number | null; snapshots_stored: number | null }> {
-  const row = await db
-    .prepare(
-      `SELECT markets_enriched, snapshots_stored
-       FROM poly_ingestion_runs
-       ORDER BY started_at DESC
-       LIMIT 1`,
-    )
-    .first<{ markets_enriched: number; snapshots_stored: number }>();
-  if (!row) {
-    return { markets_enriched: null, snapshots_stored: null };
-  }
+  const enriched = parseInt((await getState(db, "last_poly_markets_enriched")) || "", 10);
+  const snapshots = parseInt((await getState(db, "last_poly_snapshots_stored")) || "", 10);
   return {
-    markets_enriched: row.markets_enriched,
-    snapshots_stored: row.snapshots_stored,
+    markets_enriched: Number.isFinite(enriched) ? enriched : null,
+    snapshots_stored: Number.isFinite(snapshots) ? snapshots : null,
   };
 }
 
@@ -531,7 +507,6 @@ export async function getHealth(
   kalshiAuth: "missing" | "invalid" | "configured" = "missing",
 ): Promise<HealthStatus> {
   const lastPollAt = (await getState(db, "last_poll_at")) || null;
-  const snapshotTs = (await getState(db, "last_ingestion_snapshot_ts")) || null;
   const marketsTracked = parseInt((await getState(db, "last_markets_ingested")) || "0", 10);
   const matchedPairs = parseInt((await getState(db, "last_pairs_matched")) || "0", 10);
   const kalshiMarkets = parseInt((await getState(db, "last_kalshi_markets")) || "0", 10);
@@ -545,15 +520,13 @@ export async function getHealth(
   const activeOpportunities = activeRow?.c ?? 0;
   const signalsTotal = totalRow?.c ?? 0;
 
-  const [ingestedByVenue, pairsByVenue, polyRunStats, signalByVenue] = await Promise.all([
-    countIngestedMarketsByVenue(db, snapshotTs),
-    countPairsByVenue(db, snapshotTs),
+  const [polyRunStats, signalByVenue] = await Promise.all([
     latestPolymarketRunStats(db),
     signalCountsByVenue(db),
   ]);
 
-  const kalshiIngested = ingestedByVenue.kalshi || kalshiMarkets;
-  const polymarketIngested = ingestedByVenue.polymarket || polymarketMarkets;
+  const kalshiIngested = kalshiMarkets;
+  const polymarketIngested = polymarketMarkets;
 
   return {
     status: lastError ? "degraded" : "ok",
@@ -577,7 +550,7 @@ export async function getHealth(
       kalshi: buildVenueBreakdown(
         "kalshi",
         kalshiIngested,
-        pairsByVenue.kalshi,
+        matchedPairs,
         null,
         null,
         signalByVenue.kalshi,
@@ -585,7 +558,7 @@ export async function getHealth(
       polymarket: buildVenueBreakdown(
         "polymarket",
         polymarketIngested,
-        pairsByVenue.polymarket,
+        matchedPairs,
         polyRunStats.markets_enriched,
         polyRunStats.snapshots_stored,
         signalByVenue.polymarket,
@@ -602,71 +575,57 @@ export async function getHealth(
   };
 }
 
-export async function saveIngestedSnapshot(
+/** Lightweight ingest metadata — no per-market D1 snapshot tables. */
+export async function recordIngestStats(
   db: D1Database,
-  pollTs: string,
-  markets: CanonicalMarket[],
-  pairs: MatchedPair[],
+  ingestTs: string,
+  result: {
+    markets: number;
+    pairs: number;
+    kalshi_markets: number;
+    polymarket_markets: number;
+    prices_written?: number;
+    poly_markets_enriched?: number | null;
+    poly_snapshots_stored?: number | null;
+  },
 ): Promise<void> {
-  await db.batch([
-    db.prepare("DELETE FROM ingested_markets"),
-    db.prepare("DELETE FROM matched_pair_snapshots"),
+  const statements = [
     db
       .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
-      .bind("last_ingestion_snapshot_ts", pollTs),
-  ]);
-
-  const marketStatements = markets.map((market) =>
+      .bind("last_ingestion_snapshot_ts", ingestTs),
     db
-      .prepare(
-        `INSERT INTO ingested_markets
-         (poll_ts, venue, market_id, canonical_id, title, topic, probability, volume, liquidity, url, match_key, observed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(
-        pollTs,
-        market.venue,
-        market.market_id,
-        market.canonical_id,
-        truncateForD1(market.title),
-        truncateForD1(market.topic, 200),
-        market.probability,
-        market.volume,
-        market.liquidity,
-        truncateForD1(market.url, 500),
-        truncateForD1(market.match_key, 200),
-        market.observed_at,
-      ),
-  );
-  await runStatementBatches(db, marketStatements);
-
-  const pairStatements = pairs.map((pair) =>
+      .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .bind("last_markets_ingested", String(result.markets)),
     db
-      .prepare(
-        `INSERT INTO matched_pair_snapshots
-         (poll_ts, match_key, topic, title,
-          market_a_venue, market_a_id, market_a_title, market_a_probability, market_a_url,
-          market_b_venue, market_b_id, market_b_title, market_b_probability, market_b_url)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(
-        pollTs,
-        truncateForD1(pair.match_key, 200),
-        truncateForD1(pair.topic, 200),
-        truncateForD1(pair.title),
-        pair.market_a.venue,
-        pair.market_a.market_id,
-        truncateForD1(pair.market_a.title),
-        pair.market_a.probability,
-        truncateForD1(pair.market_a.url, 500),
-        pair.market_b.venue,
-        pair.market_b.market_id,
-        truncateForD1(pair.market_b.title),
-        pair.market_b.probability,
-        truncateForD1(pair.market_b.url, 500),
-      ),
-  );
-  await runStatementBatches(db, pairStatements);
+      .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .bind("last_pairs_matched", String(result.pairs)),
+    db
+      .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .bind("last_kalshi_markets", String(result.kalshi_markets)),
+    db
+      .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .bind("last_polymarket_markets", String(result.polymarket_markets)),
+    db
+      .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .bind("last_prices_written", String(result.prices_written ?? 0)),
+  ];
+
+  if (result.poly_markets_enriched != null) {
+    statements.push(
+      db
+        .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+        .bind("last_poly_markets_enriched", String(result.poly_markets_enriched)),
+    );
+  }
+  if (result.poly_snapshots_stored != null) {
+    statements.push(
+      db
+        .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+        .bind("last_poly_snapshots_stored", String(result.poly_snapshots_stored)),
+    );
+  }
+
+  await runStatementBatches(db, statements);
 }
 
 function ingestionSearchClause(search?: string): { sql: string; binds: string[] } {
@@ -683,40 +642,56 @@ export async function listIngestedMarkets(
   opts: { venue?: string; search?: string; offset?: number; limit?: number } = {},
 ): Promise<IngestedMarketsPage> {
   const pollTs = (await getState(db, "last_ingestion_snapshot_ts")) || null;
-  if (!pollTs) {
-    return {
-      poll_ts: null,
-      total: 0,
-      offset: 0,
-      limit: opts.limit ?? 50,
-      venue_counts: { kalshi: 0, polymarket: 0 },
-      markets: [],
-    };
-  }
-
-  const venueCounts = await countIngestedMarketsByVenue(db, pollTs);
-
   const offset = Math.max(0, opts.offset ?? 0);
   const limit = Math.min(200, Math.max(1, opts.limit ?? 50));
   const venue = opts.venue?.trim().toLowerCase();
   const venueClause =
-    venue === "kalshi" || venue === "polymarket" ? " AND venue = ?" : "";
+    venue === "kalshi" || venue === "polymarket" ? " AND m.venue = ?" : "";
   const search = ingestionSearchClause(opts.search);
-  const where = `WHERE poll_ts = ?${venueClause}${search.sql}`;
-  const binds: Array<string | number> = [pollTs];
+  const searchSql = search.sql
+    ? search.sql.replaceAll("title", "m.title")
+        .replaceAll("topic", "m.topic")
+        .replaceAll("market_id", "m.market_id")
+        .replaceAll("match_key", "m.match_key")
+    : "";
+  const where = `WHERE m.active = 1${venueClause}${searchSql}`;
+  const binds: Array<string | number> = [];
   if (venueClause) binds.push(venue!);
   binds.push(...search.binds);
 
   const countRow = await db
-    .prepare(`SELECT COUNT(*) AS c FROM ingested_markets ${where}`)
+    .prepare(
+      `SELECT COUNT(*) AS c
+       FROM markets m
+       INNER JOIN latest_prices lp ON lp.venue = m.venue AND lp.market_id = m.market_id
+       ${where}`,
+    )
     .bind(...binds)
     .first<{ c: number }>();
 
+  const venueRows = await db
+    .prepare(
+      `SELECT m.venue, COUNT(*) AS c
+       FROM markets m
+       INNER JOIN latest_prices lp ON lp.venue = m.venue AND lp.market_id = m.market_id
+       WHERE m.active = 1
+       GROUP BY m.venue`,
+    )
+    .all<{ venue: string; c: number }>();
+  const venueCounts = { kalshi: 0, polymarket: 0 };
+  for (const row of venueRows.results ?? []) {
+    if (row.venue === "kalshi") venueCounts.kalshi = row.c;
+    if (row.venue === "polymarket") venueCounts.polymarket = row.c;
+  }
+
   const rows = await db
     .prepare(
-      `SELECT venue, market_id, title, topic, probability, volume, liquidity, url, match_key, observed_at
-       FROM ingested_markets ${where}
-       ORDER BY venue ASC, title ASC
+      `SELECT m.venue, m.market_id, m.title, m.topic, lp.probability, lp.volume, lp.liquidity,
+              m.url, m.match_key, lp.observed_at
+       FROM markets m
+       INNER JOIN latest_prices lp ON lp.venue = m.venue AND lp.market_id = m.market_id
+       ${where}
+       ORDER BY m.venue ASC, m.title ASC
        LIMIT ? OFFSET ?`,
     )
     .bind(...binds, limit, offset)
@@ -737,77 +712,51 @@ export async function listMatchedPairSnapshots(
   opts: { search?: string; offset?: number; limit?: number } = {},
 ): Promise<MatchedPairsPage> {
   const pollTs = (await getState(db, "last_ingestion_snapshot_ts")) || null;
-  if (!pollTs) {
-    return { poll_ts: null, total: 0, offset: 0, limit: opts.limit ?? 50, pairs: [] };
-  }
-
   const offset = Math.max(0, opts.offset ?? 0);
   const limit = Math.min(200, Math.max(1, opts.limit ?? 50));
-  const search = opts.search?.trim();
-  const searchClause = search
-    ? " AND (title LIKE ? OR topic LIKE ? OR match_key LIKE ? OR market_a_title LIKE ? OR market_b_title LIKE ?)"
-    : "";
-  const searchBinds = search ? Array(5).fill(`%${search}%`) as string[] : [];
-  const where = `WHERE poll_ts = ?${searchClause}`;
-  const binds: Array<string | number> = [pollTs, ...searchBinds];
+  const search = opts.search?.trim().toLowerCase();
 
-  const countRow = await db
-    .prepare(`SELECT COUNT(*) AS c FROM matched_pair_snapshots ${where}`)
-    .bind(...binds)
-    .first<{ c: number }>();
+  const markets = await loadLatestPricesMarkets(db);
+  let pairs = matchCrossVenue(markets);
+  if (search) {
+    pairs = pairs.filter(
+      (pair) =>
+        pair.title.toLowerCase().includes(search) ||
+        pair.topic.toLowerCase().includes(search) ||
+        pair.match_key.toLowerCase().includes(search) ||
+        pair.market_a.title.toLowerCase().includes(search) ||
+        pair.market_b.title.toLowerCase().includes(search),
+    );
+  }
+  pairs.sort((a, b) => a.title.localeCompare(b.title));
+  const page = pairs.slice(offset, offset + limit);
 
-  const rows = await db
-    .prepare(
-      `SELECT match_key, topic, title,
-              market_a_venue, market_a_id, market_a_title, market_a_probability, market_a_url,
-              market_b_venue, market_b_id, market_b_title, market_b_probability, market_b_url
-       FROM matched_pair_snapshots ${where}
-       ORDER BY title ASC
-       LIMIT ? OFFSET ?`,
-    )
-    .bind(...binds, limit, offset)
-    .all<{
-      match_key: string;
-      topic: string;
-      title: string;
-      market_a_venue: string;
-      market_a_id: string;
-      market_a_title: string;
-      market_a_probability: number;
-      market_a_url: string;
-      market_b_venue: string;
-      market_b_id: string;
-      market_b_title: string;
-      market_b_probability: number;
-      market_b_url: string;
-    }>();
-
-  const pairs: MatchedPairRow[] = (rows.results ?? []).map((row) => ({
-    match_key: row.match_key,
-    topic: row.topic,
-    title: row.title,
+  const matchedRows: MatchedPairRow[] = page.map((pair) => ({
+    match_key: pair.match_key,
+    topic: pair.topic,
+    title: pair.title,
     market_a: {
-      venue: row.market_a_venue,
-      market_id: row.market_a_id,
-      title: row.market_a_title,
-      probability: row.market_a_probability,
-      url: row.market_a_url,
+      venue: pair.market_a.venue,
+      market_id: pair.market_a.market_id,
+      title: pair.market_a.title,
+      probability: pair.market_a.probability,
+      url: pair.market_a.url,
     },
     market_b: {
-      venue: row.market_b_venue,
-      market_id: row.market_b_id,
-      title: row.market_b_title,
-      probability: row.market_b_probability,
-      url: row.market_b_url,
+      venue: pair.market_b.venue,
+      market_id: pair.market_b.market_id,
+      title: pair.market_b.title,
+      probability: pair.market_b.probability,
+      url: pair.market_b.url,
     },
   }));
 
   return {
     poll_ts: pollTs,
-    total: countRow?.c ?? 0,
+    total: pairs.length,
     offset,
     limit,
-    pairs,
+    pairs: matchedRows,
   };
 }
 

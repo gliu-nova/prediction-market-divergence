@@ -3,13 +3,12 @@ import {
   archiveMarketSnapshot,
   archivePolymarketOrderbooks,
 } from "../archive/r2.ts";
-import { upsertLatestPrices, upsertMarkets, setJobState } from "../d1/tiered.ts";
+import { upsertLatestPricesIfChanged, setJobState } from "../d1/tiered.ts";
 import { normalizeRawMarket } from "../normalize.ts";
 import { fetchKalshiMarkets, kalshiAuthFromEnv } from "../sources/kalshi.ts";
 import { fetchMockMarkets } from "../sources/mock.ts";
 import { fetchPolymarketSnapshot } from "../sources/polymarket.ts";
-import { savePolymarketSnapshotD1 } from "../polymarket/storage-d1.ts";
-import { ensureTables, saveIngestedSnapshot } from "../storage.ts";
+import { ensureTables, recordIngestStats } from "../storage.ts";
 import type { CanonicalMarket, Env } from "../types.ts";
 import { loadConfig } from "../config.ts";
 import { matchCrossVenue } from "../matcher.ts";
@@ -19,6 +18,8 @@ export interface IngestResult {
   pairs: number;
   kalshi_markets: number;
   polymarket_markets: number;
+  prices_written: number;
+  prices_skipped: number;
   r2_keys: string[];
 }
 
@@ -48,7 +49,6 @@ export async function runIngestSnapshots(env: Env): Promise<IngestResult> {
     kalshiPages = kalshiIngest.pages.map((p) => ({ pageIndex: p.pageIndex, payload: p.payload }));
     polymarketSnapshot = polymarketIngest;
     polyRaw = polymarketIngest.legacyRawMarkets;
-    await savePolymarketSnapshotD1(env.DB, polymarketIngest);
   }
 
   const markets: CanonicalMarket[] = [];
@@ -76,9 +76,16 @@ export async function runIngestSnapshots(env: Env): Promise<IngestResult> {
   const obKeys = await archivePolymarketOrderbooks(env.HISTORY, ingestTs, polymarketSnapshot);
   r2Keys.push(...obKeys);
 
-  await upsertMarkets(env.DB, markets, ingestTs);
-  await upsertLatestPrices(env.DB, markets, ingestTs);
-  await saveIngestedSnapshot(env.DB, ingestTs, markets, pairs);
+  const priceWrite = await upsertLatestPricesIfChanged(env.DB, markets, ingestTs);
+  await recordIngestStats(env.DB, ingestTs, {
+    markets: markets.length,
+    pairs: pairs.length,
+    kalshi_markets: kalshiMarkets.length,
+    polymarket_markets: polyMarkets.length,
+    prices_written: priceWrite.written,
+    poly_markets_enriched: polymarketSnapshot?.run.marketsEnriched ?? null,
+    poly_snapshots_stored: polymarketSnapshot?.run.snapshotsStored ?? null,
+  });
   await setJobState(env.DB, "last_ingest_at", ingestTs);
 
   return {
@@ -86,6 +93,8 @@ export async function runIngestSnapshots(env: Env): Promise<IngestResult> {
     pairs: pairs.length,
     kalshi_markets: kalshiMarkets.length,
     polymarket_markets: polyMarkets.length,
+    prices_written: priceWrite.written,
+    prices_skipped: priceWrite.skipped,
     r2_keys: r2Keys,
   };
 }
