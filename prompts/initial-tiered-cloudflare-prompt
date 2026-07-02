@@ -1,0 +1,66 @@
+Implement a tiered data pipeline for the prediction-market bot.
+
+### Goal
+Create a maintainable, cost-efficient system with clear separation of concerns:
+- **Live / serving path** → fast, compact data in D1 only
+- **Raw history path** → cheap, durable storage in R2
+- **Analytics / research path** → DuckDB for heavy computation (features + backtesting)
+
+The live bot and opportunity detection should **never** touch raw historical files or run DuckDB queries directly.
+
+**Hot data (D1 – compact & queryable):**
+- `markets` – static + slowly changing market metadata
+- `latest_market_state` – current price, liquidity, spread, volume, last updated
+- `active_opportunities` – currently detected opportunities with scores
+- `opportunity_events` – historical opportunity occurrences (compact rows)
+- `market_features` – precomputed compact features (percentiles, rolling stats, similarity signals, etc.)
+- `bot_post_cooldowns` – rate limiting / posting history for the X/Twitter bot
+
+**Cold / raw data (R2):**
+- Store every raw API response as compressed JSONL (or later Parquet)
+- Partitioning: `raw/{source}/{date=YYYY-MM-DD}/{hour=HH}/` (hive-style where possible)
+- Use gzip or zstd compression
+- Never store full historical snapshots in D1 long-term
+
+Use DuckDB as the analytics/backtesting engine:
+- DuckDB should read historical snapshot files from R2 or from a local synced cache of R2 files.
+- DuckDB should compute historical features, percentiles, similar-event counts, reversion stats, and backtest results.
+- DuckDB output should be compact summary rows that get written back to D1.
+- The Twitter bot should not query DuckDB directly in the live posting path.
+- DuckDB can be run locally at first, then later from GitHub Actions, a VPS, or another scheduled batch environment.
+
+**Live / frequent jobs (lightweight, can run every 1-5 minutes):**
+- `discover_markets`: Refresh active markets and metadata. Update `markets` table.
+- `ingest_snapshots`: Poll selected markets, write raw responses to R2 (partitioned JSONL), update `latest_market_state` in D1.
+- `detect_opportunities`: Compare current state vs features/thresholds and maintain `active_opportunities`.
+- `cleanup_retention`: Enforce retention policies so D1 stays small (delete old raw history references, old opportunity events, etc.).
+
+**Heavy batch jobs (DuckDB-powered, run hourly/daily or on-demand):**
+- `build_features`: Read historical snapshots from R2 with DuckDB. Compute 1h/24h changes, spread/volume/liquidity percentiles, similar-event counts, reversion signals, etc. Write compact rows to `market_features`.
+- `backtest_opportunities`: Analyze historical `opportunity_events` + features. Calculate fill probability, expected reversion time, realized edge, false positive rate, etc. Store results in D1.
+- `compact_archives`: Convert older raw JSONL files into compressed, typed, partitioned Parquet files (much faster for future DuckDB queries). Optionally prune very old JSONL after successful compaction.
+
+### CLI Commands (use Typer + Rich for excellent UX)
+
+All commands should support `--dry-run`, `--verbose`, `--since`, `--until`, `--source`, and good progress output.
+
+Required commands:
+- `pm discover-markets`
+- `pm ingest-snapshots [--markets MARKET1,MARKET2]`
+- `pm detect-opportunities`
+- `pm build-features --since YYYY-MM-DD [--until YYYY-MM-DD]`
+- `pm backtest-opportunities --since YYYY-MM-DD`
+- `pm compact-archives --date YYYY-MM-DD` (or `--since` / `--until`)
+- `pm cleanup-retention`
+- `pm backfill --source polymarket --since YYYY-MM-DD` (useful for initial migration)
+
+Also provide a `pm status` or `pm dashboard` command that shows current state from D1 (active opportunities, last ingest times, etc.).
+
+Data-flow rule:
+- Live bot path: API → D1 latest/opportunities → bot.
+- Raw history path: API → R2.
+- Research/analytics path: R2 → DuckDB → D1 summaries.
+- The bot should read compact summaries from D1, not raw R2 files or DuckDB directly.
+
+
+Update README.md with critical points from above, for example CLI commands. 

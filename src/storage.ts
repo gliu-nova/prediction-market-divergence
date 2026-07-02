@@ -1,3 +1,4 @@
+import { tieredTableStatements } from "./d1/tiered.ts";
 import { polyIngestionTableStatements } from "./polymarket/storage-d1";
 import type {
   AppConfig,
@@ -132,6 +133,7 @@ export async function ensureTables(db: D1Database): Promise<void> {
       PRIMARY KEY (poll_ts, match_key)
     )`),
     ...polyIngestionTableStatements.map((sql) => db.prepare(sql)),
+    ...tieredTableStatements.map((sql) => db.prepare(sql)),
   ]);
 }
 

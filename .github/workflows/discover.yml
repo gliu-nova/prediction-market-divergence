@@ -1,0 +1,29 @@
+name: Market Discovery
+
+on:
+  schedule:
+    - cron: "0 */4 * * *"
+  workflow_dispatch:
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger market discovery
+        env:
+          POLL_SECRET: ${{ secrets.POLL_SECRET }}
+        run: |
+          set -euo pipefail
+          URL="https://prediction-market-divergence.pages.dev/jobs/discover"
+          if [ -n "${POLL_SECRET:-}" ]; then
+            HTTP=$(curl -sS -o /tmp/pmd-discover.json -w "%{http_code}" -X POST -H "Authorization: Bearer ${POLL_SECRET}" "$URL")
+          else
+            HTTP=$(curl -sS -o /tmp/pmd-discover.json -w "%{http_code}" -X POST "$URL")
+          fi
+          echo "Discover HTTP: $HTTP"
+          cat /tmp/pmd-discover.json
+          echo
+          if [ "$HTTP" != "200" ]; then
+            echo "ERROR: POST /jobs/discover returned HTTP $HTTP"
+            exit 1
+          fi

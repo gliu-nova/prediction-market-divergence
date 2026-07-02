@@ -20,13 +20,18 @@ function venueLabel(venue: "kalshi" | "polymarket"): string {
   return venue === "kalshi" ? "Kalshi" : "Polymarket";
 }
 
-export function detectCrossVenue(
+export interface DetectedSignal {
+  signal: Signal;
+  match_key: string;
+}
+
+export function detectCrossVenueWithKeys(
   config: AppConfig,
   pairs: MatchedPair[],
   maxGapByPair: Map<string, number | null>,
-): Signal[] {
+): DetectedSignal[] {
   const now = new Date().toISOString();
-  const signals: Signal[] = [];
+  const results: DetectedSignal[] = [];
 
   for (const pair of pairs) {
     const diffPp = Math.abs(pair.market_a.probability - pair.market_b.probability) * 100;
@@ -44,36 +49,47 @@ export function detectCrossVenue(
 
     const score = scoreDivergence(config, diffPp, pair.market_a, pair.market_b, maxGap, observedAt);
 
-    signals.push({
-      id: signalId(pair),
-      type: "prediction_market_divergence",
-      title: headline(pair.topic),
-      asset_or_topic: pair.topic,
-      market_a: {
-        venue: venueLabel(pair.market_a.venue),
-        probability: Math.round(pair.market_a.probability * 10000) / 10000,
-        url: pair.market_a.url,
-        market_id: pair.market_a.market_id,
-        volume: pair.market_a.volume,
-        liquidity: pair.market_a.liquidity,
+    results.push({
+      match_key: pair.match_key,
+      signal: {
+        id: signalId(pair),
+        type: "prediction_market_divergence",
+        title: headline(pair.topic),
+        asset_or_topic: pair.topic,
+        market_a: {
+          venue: venueLabel(pair.market_a.venue),
+          probability: Math.round(pair.market_a.probability * 10000) / 10000,
+          url: pair.market_a.url,
+          market_id: pair.market_a.market_id,
+          volume: pair.market_a.volume,
+          liquidity: pair.market_a.liquidity,
+        },
+        market_b: {
+          venue: venueLabel(pair.market_b.venue),
+          probability: Math.round(pair.market_b.probability * 10000) / 10000,
+          url: pair.market_b.url,
+          market_id: pair.market_b.market_id,
+          volume: pair.market_b.volume,
+          liquidity: pair.market_b.liquidity,
+        },
+        difference_pct_points: Math.round(diffPp * 10) / 10,
+        implied_arb_profit_pct: Math.round(diffPp * 10) / 10,
+        lookback_context: lookbackContext(config, diffPp, maxGap),
+        score,
+        created_at: now,
+        tweet_hint: `${venueLabel(pair.market_a.venue)} and ${venueLabel(pair.market_b.venue)} disagree by ${diffPp.toFixed(0)} pts on ${pair.topic.toLowerCase()} odds.`,
+        is_active: true,
       },
-      market_b: {
-        venue: venueLabel(pair.market_b.venue),
-        probability: Math.round(pair.market_b.probability * 10000) / 10000,
-        url: pair.market_b.url,
-        market_id: pair.market_b.market_id,
-        volume: pair.market_b.volume,
-        liquidity: pair.market_b.liquidity,
-      },
-      difference_pct_points: Math.round(diffPp * 10) / 10,
-      implied_arb_profit_pct: Math.round(diffPp * 10) / 10,
-      lookback_context: lookbackContext(config, diffPp, maxGap),
-      score,
-      created_at: now,
-      tweet_hint: `${venueLabel(pair.market_a.venue)} and ${venueLabel(pair.market_b.venue)} disagree by ${diffPp.toFixed(0)} pts on ${pair.topic.toLowerCase()} odds.`,
-      is_active: true,
     });
   }
 
-  return signals;
+  return results;
+}
+
+export function detectCrossVenue(
+  config: AppConfig,
+  pairs: MatchedPair[],
+  maxGapByPair: Map<string, number | null>,
+): Signal[] {
+  return detectCrossVenueWithKeys(config, pairs, maxGapByPair).map((r) => r.signal);
 }

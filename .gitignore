@@ -8,6 +8,8 @@ __pycache__/
 .env
 data/*.db
 data/*.db-journal
+data/r2-cache/
+data/research.duckdb
 .pytest_cache/
 *.egg-info/
 dist/

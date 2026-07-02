@@ -1,0 +1,42 @@
+name: Daily R2 DuckDB Research
+
+on:
+  schedule:
+    - cron: "30 6 * * *"
+  workflow_dispatch:
+    inputs:
+      since:
+        description: "YYYY-MM-DD date to process (defaults to yesterday UTC)"
+        required: false
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          pip install -r research/requirements.txt
+
+      - name: Run daily research pipeline
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          SINCE="${{ github.event.inputs.since }}"
+          if [ -z "${SINCE}" ]; then
+            SINCE=$(date -u -d "yesterday" +%Y-%m-%d)
+          fi
+          cd research
+          python pm.py run-daily --since "$SINCE"

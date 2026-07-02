@@ -1,7 +1,11 @@
 # AGENTS.md - Grok Build Instructions
 
 ## Project Overview
-Cloudflare Pages service (TypeScript + D1) that ingests prediction market data (Polymarket, Kalshi), normalizes and matches markets across venues, detects divergences and pricing inefficiencies, stores historical observations in D1, and exposes ranked signals via Hono for the `twitter-bot` project to poll and tweet. Scheduled polling every 15 minutes via GitHub Actions (`.github/workflows/poll.yml` → `POST /poll`). Deploy: GitHub Actions → `wrangler pages deploy`.
+Cloudflare Pages service (TypeScript + D1 + R2) that ingests prediction market data (Polymarket, Kalshi), normalizes and matches markets across venues, detects divergences, and exposes ranked signals via Hono for the `twitter-bot` project to poll and tweet.
+
+**Tiered storage:** D1 for live compact state (`markets`, `latest_prices`, `signals`, `opportunity_events`, `indicator_summaries`, `cooldowns`); R2 for raw JSONL.gz archives; local DuckDB (`research/pm.py`) for heavy analytics that writes compact summaries back to D1. The live bot never reads R2 or DuckDB.
+
+**Jobs:** discover (4h) → `POST /jobs/discover`; ingest (15m) → `POST /jobs/ingest`; detect (15m) → `POST /jobs/detect`; summarize (12h) → `POST /jobs/summarize`; daily research → `research/pm.py run-daily`. `POST /poll` = ingest + detect. Deploy: GitHub Actions → `wrangler pages deploy`.
 
 ## Signal Output Format
 Signals must be structured JSON that `twitter-bot` can turn into scannable tweets. Include: title, venue prices, difference, score, URLs, tweet_hint, timestamps.

@@ -1,24 +1,11 @@
 import { runD1DailyCleanupIfDue } from "./cleanup-d1";
 import { loadConfig } from "./config";
-import { detectCrossVenue } from "./divergence";
-import { matchCrossVenue } from "./matcher";
-import { normalizeRawMarket, toObservation } from "./normalize";
-import { fetchKalshiMarkets, kalshiAuthFromEnv } from "./sources/kalshi";
-import { fetchMockMarkets } from "./sources/mock";
-import { archivePollHistory } from "./history-r2";
-import { savePolymarketSnapshotD1 } from "./polymarket/storage-d1";
-import type { PolymarketSnapshotResult } from "./polymarket/types";
-import { fetchPolymarketSnapshot } from "./sources/polymarket";
-import {
-  ensureTables,
-  maxHistoricalGapsForPairs,
-  pruneObservations,
-  recordPollResult,
-  saveIngestedSnapshot,
-  saveObservationsBatched,
-  syncActiveSignals,
-} from "./storage";
-import type { CanonicalMarket, Env, MarketObservation, MatchedPair } from "./types";
+import { runDetectOpportunities } from "./jobs/detect-opportunities.ts";
+import { runDiscoverMarkets } from "./jobs/discover-markets.ts";
+import { runIngestSnapshots } from "./jobs/ingest-snapshots.ts";
+import { runSummarize } from "./jobs/summarize.ts";
+import { ensureTables, recordPollResult } from "./storage";
+import type { Env } from "./types";
 
 export interface PollResult {
   markets: number;
@@ -26,86 +13,21 @@ export interface PollResult {
   opportunities: number;
 }
 
-function observationsForPairs(pairs: MatchedPair[]): MarketObservation[] {
-  const seen = new Set<string>();
-  const observations: MarketObservation[] = [];
-
-  for (const pair of pairs) {
-    for (const market of [pair.market_a, pair.market_b]) {
-      const key = `${market.venue}:${market.market_id}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      observations.push(toObservation(market));
-    }
-  }
-
-  return observations;
-}
-
+/** Full pipeline: ingest + detect (backward-compatible with POST /poll). */
 export async function runPoll(env: Env): Promise<PollResult> {
   const config = loadConfig(env);
-  const pollTs = new Date().toISOString();
-
   try {
     await ensureTables(env.DB);
     await runD1DailyCleanupIfDue(env.DB, config.observationRetentionDays);
 
-    let kalshiRaw: Record<string, unknown>[] = [];
-    let polyRaw: Record<string, unknown>[] = [];
-    let polymarketSnapshot: PolymarketSnapshotResult | null = null;
+    const ingest = await runIngestSnapshots(env);
+    const detect = await runDetectOpportunities(env);
 
-    if (config.useMock) {
-      kalshiRaw = fetchMockMarkets("kalshi", pollTs);
-      polyRaw = fetchMockMarkets("polymarket", pollTs);
-    } else {
-      const kalshiAuth = kalshiAuthFromEnv(env);
-      const [kalshiIngest, polymarketIngest] = await Promise.all([
-        fetchKalshiMarkets(pollTs, { auth: kalshiAuth }),
-        fetchPolymarketSnapshot(pollTs, { env: env as unknown as Record<string, string | undefined> }),
-      ]);
-      kalshiRaw = kalshiIngest.markets;
-      polymarketSnapshot = polymarketIngest;
-      polyRaw = polymarketIngest.legacyRawMarkets;
-      await savePolymarketSnapshotD1(env.DB, polymarketIngest);
-    }
-
-    const markets: CanonicalMarket[] = [];
-    for (const raw of [...kalshiRaw, ...polyRaw]) {
-      const canonical = normalizeRawMarket(raw, pollTs);
-      if (!canonical) continue;
-      markets.push(canonical);
-    }
-
-    const pairs = matchCrossVenue(markets);
-    await saveIngestedSnapshot(env.DB, pollTs, markets, pairs);
-    await saveObservationsBatched(env.DB, observationsForPairs(pairs));
-    await pruneObservations(env.DB, config.observationRetentionDays);
-
-    const maxGapByPair = await maxHistoricalGapsForPairs(env.DB, pairs, config.lookbackDays, pollTs);
-
-    const signals = detectCrossVenue(config, pairs, maxGapByPair);
-    await syncActiveSignals(env.DB, signals);
-    const kalshiMarkets = markets.filter((market) => market.venue === "kalshi").length;
-    const polymarketMarkets = markets.filter((market) => market.venue === "polymarket").length;
-
-    await recordPollResult(env.DB, {
-      markets: markets.length,
-      pairs: pairs.length,
-      opportunities: signals.length,
-      kalshi_markets: kalshiMarkets,
-      polymarket_markets: polymarketMarkets,
-    });
-
-    await archivePollHistory(env.HISTORY, pollTs, polymarketSnapshot, {
-      poll_ts: pollTs,
-      markets_total: markets.length,
-      kalshi_markets: kalshiMarkets,
-      polymarket_markets: polymarketMarkets,
-      matched_pairs: pairs.length,
-      opportunities: signals.length,
-    }, markets, pairs);
-
-    return { markets: markets.length, pairs: pairs.length, opportunities: signals.length };
+    return {
+      markets: ingest.markets,
+      pairs: ingest.pairs,
+      opportunities: detect.opportunities,
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await recordPollResult(env.DB, {
@@ -119,3 +41,5 @@ export async function runPoll(env: Env): Promise<PollResult> {
     throw err;
   }
 }
+
+export { runDiscoverMarkets, runIngestSnapshots, runDetectOpportunities, runSummarize };

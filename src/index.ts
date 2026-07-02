@@ -2,6 +2,11 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { runD1Cleanup } from "./cleanup-d1";
 import { loadConfig } from "./config";
+import { authorizeJob } from "./jobs/auth.ts";
+import { runDetectOpportunities } from "./jobs/detect-opportunities.ts";
+import { runDiscoverMarkets } from "./jobs/discover-markets.ts";
+import { runIngestSnapshots } from "./jobs/ingest-snapshots.ts";
+import { runSummarize } from "./jobs/summarize.ts";
 import { runPoll } from "./poll";
 import { kalshiAuthStatus } from "./sources/kalshi";
 import {
@@ -113,12 +118,30 @@ app.get("/opportunities/:id", async (c) => {
   return c.json(opportunityPayload(opp));
 });
 
+function jobHandler<T extends object>(
+  runner: (env: Env) => Promise<T>,
+): (c: import("hono").Context<{ Bindings: Env }>) => Promise<Response> {
+  return async (c) => {
+    const denied = authorizeJob(c);
+    if (denied) return denied;
+    try {
+      const result = await runner(c.env);
+      return c.json({ status: "ok", ...result });
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      return c.json({ status: "error", detail }, 500);
+    }
+  };
+}
+
+app.post("/jobs/discover", jobHandler(runDiscoverMarkets));
+app.post("/jobs/ingest", jobHandler(runIngestSnapshots));
+app.post("/jobs/detect", jobHandler(runDetectOpportunities));
+app.post("/jobs/summarize", jobHandler(runSummarize));
+
 app.post("/maintenance/cleanup", async (c) => {
-  const secret = c.env.POLL_SECRET;
-  if (secret) {
-    const auth = c.req.header("Authorization") ?? "";
-    if (auth !== `Bearer ${secret}`) return c.json({ detail: "Unauthorized" }, 401);
-  }
+  const denied = authorizeJob(c);
+  if (denied) return denied;
   try {
     const config = loadConfig(c.env);
     const result = await runD1Cleanup(c.env.DB, config.observationRetentionDays);
@@ -130,11 +153,8 @@ app.post("/maintenance/cleanup", async (c) => {
 });
 
 app.post("/poll", async (c) => {
-  const secret = c.env.POLL_SECRET;
-  if (secret) {
-    const auth = c.req.header("Authorization") ?? "";
-    if (auth !== `Bearer ${secret}`) return c.json({ detail: "Unauthorized" }, 401);
-  }
+  const denied = authorizeJob(c);
+  if (denied) return denied;
   try {
     const result = await runPoll(c.env);
     return c.json({ opportunities_found: result.opportunities, status: "ok", ...result });

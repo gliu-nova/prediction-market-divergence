@@ -1,27 +1,45 @@
 # Prediction Market Divergence
 
-Cross-venue prediction market signal engine (Kalshi ↔ Polymarket). Detects probability divergences, stores history in Cloudflare D1, and exposes ranked opportunities via HTTP for [`twitter-bot`](../twitter-bot) to poll and tweet.
+Cross-venue prediction market signal engine (Kalshi ↔ Polymarket). Detects probability divergences across venues and exposes ranked opportunities via HTTP for [`twitter-bot`](../twitter-bot) to poll and tweet.
 
-## Architecture
+## Tiered architecture
+
+| Layer | Store | Purpose |
+|-------|-------|---------|
+| Live / serving | **D1** | `markets`, `latest_prices`, `signals` (active opportunities), `opportunity_events`, `indicator_summaries`, `cooldowns`, `bot_posts` |
+| Raw archive | **R2** | Partitioned JSONL.gz: `polymarket/markets/YYYY-MM-DD/HH.jsonl.gz`, `kalshi/markets/...`, `polymarket/orderbooks/YYYY-MM-DD/{market_id}.jsonl.gz` |
+| Research | **Local DuckDB** | Heavy percentiles, gap stats, backtest features from downloaded R2 files → compact rows pushed back to D1 |
+
+The live bot path reads **D1 only** — never R2 or DuckDB directly.
+
+### Scheduled jobs (GitHub Actions)
+
+| Job | Schedule | Endpoint / command |
+|-----|----------|---------------------|
+| Market discovery | Every 4h | `POST /jobs/discover` |
+| Snapshot ingestion | Every 15 min | `POST /jobs/ingest` |
+| Opportunity detection | Every 15 min | `POST /jobs/detect` |
+| D1 summarization | Every 12h | `POST /jobs/summarize` |
+| R2 → DuckDB → D1 | Daily 06:30 UTC | `research/pm.py run-daily` |
+| D1 retention cleanup | Daily midnight UTC | `POST /maintenance/cleanup` |
+
+`POST /poll` remains as a backward-compatible shortcut (ingest + detect).
+
+```
+API fetch → R2 (raw JSONL.gz) + D1 (latest_prices, markets)
+         → detect → D1 (signals, opportunity_events)
+R2 cache → DuckDB (features) → D1 (indicator_summaries)
+twitter-bot → GET /opportunities (D1 signals)
+```
 
 | Component | Technology |
 |-----------|------------|
 | Runtime | Cloudflare Pages Functions |
-| API | Hono (`src/index.ts`, `functions/`) |
-| Database | Cloudflare D1 (SQLite) |
+| API | Hono (`src/index.ts`) |
+| Live DB | Cloudflare D1 |
+| Raw history | Cloudflare R2 (`HISTORY` binding) |
+| Research | Python + DuckDB (`research/pm.py`) |
 | Deploy | GitHub Actions → `wrangler pages deploy` |
-| Polling | GitHub Actions every 15 min (`.github/workflows/poll.yml` → `POST /poll`) |
-
-```
-GitHub (main push)
-    → GitHub Actions deploy
-        → Cloudflare Pages (public API + dashboard)
-            → D1 (observations + signals + poll_state)
-GitHub Actions (*/15 * * * *)
-    → POST /poll → ingest Kalshi/Polymarket → D1
-twitter-bot
-    → GET https://prediction-market-divergence.pages.dev/opportunities
-```
 
 ---
 
@@ -44,6 +62,8 @@ Copy the `database_id` into `wrangler.toml`, then:
 
 ```bash
 npm run db:remote
+npm run db:remote:tiered
+npm run r2:create-history
 ```
 
 ### 2. Create Cloudflare Pages project
@@ -63,6 +83,7 @@ Pages project → **Settings** → **Bindings**:
 | Type | Name | Value |
 |------|------|-------|
 | D1 database | `DB` | `prediction-market-divergence` |
+| R2 bucket | `HISTORY` | `prediction-market-divergence-history` |
 
 **Settings → Environment variables** (production):
 
@@ -206,10 +227,12 @@ Polymarket data is ingested through modular pipelines under `src/polymarket/`:
 | `clob-ws.ts` | CLOB WebSocket | Optional near-real-time book/price/trade events (CLI) |
 | `data-api.ts` | Polymarket Data API | Recent trades / activity backfill |
 | `snapshot.ts` | Orchestrator | Builds normalized snapshots for poll + CLI |
-| `storage-d1.ts` | Cloudflare D1 | Persists runs, markets, price/book/trade history |
+| `storage-d1.ts` | Cloudflare D1 | Live Polymarket market metadata (`poly_markets`) |
+| `archive/r2.ts` | Cloudflare R2 | Partitioned raw JSONL.gz archives |
+| `d1/tiered.ts` | Cloudflare D1 | `markets`, `latest_prices`, `indicator_summaries`, etc. |
 | `storage-local.ts` | `data/polymarket/` | Local JSON snapshots for CLI workflows |
 
-The existing poll path still calls `fetchPolymarketMarkets()` and produces legacy raw rows for cross-venue matching, but each poll now also stores richer Polymarket snapshots in D1.
+Ingest writes raw snapshots to R2 and compact live state to D1. Historical price/book detail is **not** stored long-term in D1.
 
 ### Environment variables
 
@@ -238,17 +261,31 @@ npm run polymarket -- inspect-market fed-cut-sep-2026
 
 Local CLI snapshots are written to `data/polymarket/snapshot-<run-id>.json` with a rolling `ingestion-runs.jsonl` index.
 
-### Stored schemas
+### Research CLI (DuckDB)
 
-Each poll/CLI run can persist:
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r research/requirements.txt
 
-- `poly_ingestion_runs`
-- `poly_markets`
-- `poly_price_snapshots`
-- `poly_order_book_snapshots`
-- `poly_trades`
+cd research
+python pm.py sync-r2 --since 2026-06-01      # download R2 archives locally
+python pm.py build-features --since 2026-06-01
+python pm.py push-d1 --since 2026-06-01      # write indicator_summaries to D1
+python pm.py run-daily                       # full daily batch (yesterday UTC)
+python pm.py status
+```
 
-Tables are auto-created by `ensureTables()`; optional migration: `npm run db:remote:polymarket`.
+Or from repo root: `npm run research:daily`
+
+Requires `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` for R2/D1 wrangler calls.
+
+### D1 live tables (tiered)
+
+- `markets`, `latest_prices`, `opportunity_events`, `indicator_summaries`, `cooldowns`, `bot_posts`
+- `signals` — active opportunities (twitter-bot reads these)
+- `poll_state` — job timestamps
+
+Migration: `npm run db:remote:tiered`. Tables are also auto-created by `ensureTables()`.
 
 ---
 
@@ -258,8 +295,9 @@ Tables are auto-created by `ensureTables()`; optional migration: `npm run db:rem
 |---------|---------------------|----------------------|
 | Cloudflare Pages | 500 builds/month, unlimited requests | 1 deploy per push; API reads low |
 | Cloudflare Pages Functions | 100k requests/day | ~96 poll POSTs/day + API traffic |
-| Cloudflare D1 | 5M rows read/day, 100k writes/day | Poll writes scale with market count |
-| GitHub Actions | 2000 min/month (private repos) | Deploy + scheduled poll (~1 min each) |
+| Cloudflare D1 | 5M rows read/day, 100k writes/day | Compact live rows only |
+| Cloudflare R2 | 10 GB storage free | Raw JSONL.gz archives |
+| GitHub Actions | 2000 min/month (private repos) | Deploy + ingest/detect/discover/summarize/research |
 
 Polling + D1 should stay **$0/month** at this scale.
 
@@ -269,15 +307,22 @@ Polling + D1 should stay **$0/month** at this scale.
 
 ```
 src/                        # TypeScript cloud engine
-src/polymarket/             # Polymarket discovery, CLOB, snapshot, storage modules
+src/jobs/                   # discover, ingest, detect, summarize
+src/d1/                     # Tiered D1 storage (markets, latest_prices, indicators)
+src/archive/                # R2 JSONL.gz writers
+src/polymarket/             # Polymarket discovery, CLOB, snapshot modules
+research/                   # DuckDB research CLI (pm.py)
 scripts/polymarket-cli.ts   # Local Polymarket ingestion CLI
-functions/
-  [[path]].ts               # Pages API handler (routes to Hono app)
+functions/[[path]].ts       # Pages API handler
 public/                     # Dashboard static files
 migrations/                 # D1 schema
-wrangler.toml               # Cloudflare Pages config (D1, vars)
+wrangler.toml               # D1 + R2 bindings
 .github/workflows/
   deploy.yml                # Deploy on push to main
-  poll.yml                  # Scheduled poll every 15 min
+  poll.yml                  # Ingest + detect every 15 min
+  discover.yml              # Market discovery every 4h
+  summarize.yml             # D1 rollup every 12h
+  research-daily.yml          # R2 → DuckDB → D1 daily
+  cleanup.yml               # D1 retention daily
 scripts/deploy.sh
 ```

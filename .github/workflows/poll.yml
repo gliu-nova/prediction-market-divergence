@@ -1,4 +1,4 @@
-name: Scheduled Poll
+name: Scheduled Ingest and Detect
 
 on:
   schedule:
@@ -9,19 +9,34 @@ jobs:
   poll:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger cloud poll
+      - name: Trigger ingest + detect
         env:
           POLL_SECRET: ${{ secrets.POLL_SECRET }}
         run: |
           set -euo pipefail
-          URL="https://prediction-market-divergence.pages.dev/poll"
+          BASE="https://prediction-market-divergence.pages.dev"
+          AUTH=()
           if [ -n "${POLL_SECRET:-}" ]; then
-            POLL_HTTP=$(curl -sS -o /tmp/pmd-poll.json -w "%{http_code}" -X POST -H "Authorization: Bearer ${POLL_SECRET}" "$URL")
-          else
-            POLL_HTTP=$(curl -sS -o /tmp/pmd-poll.json -w "%{http_code}" -X POST "$URL")
+            AUTH=(-H "Authorization: Bearer ${POLL_SECRET}")
           fi
-          echo "Poll HTTP: $POLL_HTTP"
-          cat /tmp/pmd-poll.json
+
+          INGEST_HTTP=$(curl -sS -o /tmp/pmd-ingest.json -w "%{http_code}" -X POST "${AUTH[@]}" "$BASE/jobs/ingest")
+          echo "Ingest HTTP: $INGEST_HTTP"
+          cat /tmp/pmd-ingest.json
+          echo
+
+          DETECT_HTTP=$(curl -sS -o /tmp/pmd-detect.json -w "%{http_code}" -X POST "${AUTH[@]}" "$BASE/jobs/detect")
+          echo "Detect HTTP: $DETECT_HTTP"
+          cat /tmp/pmd-detect.json
+          echo
+
+          POLL_HTTP=$INGEST_HTTP
+          if [ "$INGEST_HTTP" = "200" ] && [ "$DETECT_HTTP" = "200" ]; then
+            POLL_HTTP=200
+            jq -s '{status:"ok", ingest:.[0], detect:.[1]}' /tmp/pmd-ingest.json /tmp/pmd-detect.json > /tmp/pmd-poll.json
+          fi
+          echo "Combined status HTTP: $POLL_HTTP"
+          cat /tmp/pmd-poll.json 2>/dev/null || true
           echo
 
           HEALTH_URL="https://prediction-market-divergence.pages.dev/health"

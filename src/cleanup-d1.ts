@@ -1,3 +1,4 @@
+import { pruneTieredState } from "./d1/tiered.ts";
 import { pruneKalshiIngest } from "./kalshi-ingest.ts";
 import { pruneObservations } from "./storage.ts";
 
@@ -58,6 +59,7 @@ export async function runD1Cleanup(db: D1Database, retentionDays: number): Promi
 
   await pruneObservations(db, retentionDays);
   await pruneKalshiIngest(db, retentionDays);
+  const tieredRemoved = await pruneTieredState(db, retentionDays);
 
   const after: Record<string, number> = {
     poly_price_snapshots: await tableCount(db, "poly_price_snapshots"),
@@ -72,6 +74,7 @@ export async function runD1Cleanup(db: D1Database, retentionDays: number): Promi
   for (const key of Object.keys(before)) {
     tables[key] = Math.max(0, before[key]! - after[key]!);
   }
+  Object.assign(tables, tieredRemoved);
 
   await setState(db, CLEANUP_STATE_KEY, ranAt);
 
