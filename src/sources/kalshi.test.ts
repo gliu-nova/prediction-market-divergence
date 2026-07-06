@@ -177,6 +177,7 @@ describe("fetchKalshiMarkets", () => {
     assert.equal(result.markets[0]?.ticker, "ONE");
     assert.equal(result.markets[0]?.venue, "kalshi");
     assert.equal(result.markets[0]?.fetched_at, "2026-06-26T00:00:00.000Z");
+    assert.equal(result.markets[0]?.url, "https://kalshi.com/markets/ONE");
     assert.equal(result.markets[2]?.ticker, "THREE");
   });
 

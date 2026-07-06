@@ -1,5 +1,6 @@
 import type { GammaMarketRow } from "./discovery.ts";
 import type { ClobPriceQuote } from "./clob-rest.ts";
+import { buildPolymarketMarketUrl } from "../market-urls.ts";
 import type { Event, Market, OutcomeToken, PriceSnapshot } from "./types.ts";
 
 function parseJsonArray<T>(value: unknown): T[] {
@@ -76,7 +77,7 @@ export function normalizeGammaMarket(raw: GammaMarketRow): Market | null {
     bestAsk: toNumber(raw.bestAsk),
     lastTradePrice: toNumber(raw.lastTradePrice),
     sourceUpdatedAt: (raw.updatedAt as string | undefined) ?? null,
-    url: `https://polymarket.com/event/${slug}`,
+    url: buildPolymarketMarketUrl(raw, id),
   };
 }
 

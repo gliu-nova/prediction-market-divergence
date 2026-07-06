@@ -1,4 +1,5 @@
 import type { CanonicalMarket, MarketObservation } from "./types";
+import { buildKalshiMarketUrl, buildPolymarketMarketUrl } from "./market-urls.ts";
 
 const TOPIC_KEYWORDS: Record<string, string> = {
   fed: "Fed rates",
@@ -125,10 +126,10 @@ function extractLiquidity(raw: Record<string, unknown>): number | null {
 }
 
 function extractUrl(raw: Record<string, unknown>, venue: string, marketId: string): string {
+  if (venue === "kalshi") return buildKalshiMarketUrl(raw);
+  if (venue === "polymarket") return buildPolymarketMarketUrl(raw, marketId);
   if (raw.url) return String(raw.url);
-  if (venue === "kalshi") return `https://kalshi.com/markets/${marketId.toLowerCase()}`;
-  const slug = String(raw.slug ?? marketId);
-  return `https://polymarket.com/event/${slug}`;
+  return "";
 }
 
 function buildMatchKey(title: string, topic: string): string {

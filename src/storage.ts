@@ -116,6 +116,7 @@ export async function ensureTables(db: D1Database): Promise<void> {
     )`),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_ingested_markets_venue ON ingested_markets(venue)"),
     db.prepare("CREATE INDEX IF NOT EXISTS idx_ingested_markets_title ON ingested_markets(title)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_ingested_markets_poll_ts ON ingested_markets(poll_ts)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS matched_pair_snapshots (
       poll_ts TEXT NOT NULL,
       match_key TEXT NOT NULL,
@@ -649,74 +650,157 @@ export async function recordIngestStats(
   await runStatementBatches(db, statements);
 }
 
-function ingestionSearchClause(search?: string): { sql: string; binds: string[] } {
+function ingestionSearchClauseForSnapshot(search?: string): { sql: string; binds: string[] } {
   if (!search?.trim()) return { sql: "", binds: [] };
   const pattern = `%${search.trim()}%`;
   return {
-    sql: " AND (title LIKE ? OR topic LIKE ? OR market_id LIKE ? OR match_key LIKE ?)",
+    sql: " AND (im.title LIKE ? OR im.topic LIKE ? OR im.market_id LIKE ? OR im.match_key LIKE ?)",
     binds: [pattern, pattern, pattern, pattern],
   };
 }
+
+export async function getLastIngestionPollTs(db: D1Database): Promise<string | null> {
+  const value = await getState(db, "last_ingestion_snapshot_ts");
+  return value || null;
+}
+
+export async function saveIngestedMarketsSnapshot(
+  db: D1Database,
+  pollTs: string,
+  markets: CanonicalMarket[],
+): Promise<void> {
+  const statements: D1PreparedStatement[] = [
+    db.prepare("DELETE FROM ingested_markets WHERE poll_ts = ?").bind(pollTs),
+  ];
+
+  for (const market of markets) {
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO ingested_markets
+           (poll_ts, venue, market_id, canonical_id, title, topic, probability, volume, liquidity, url, match_key, observed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          pollTs,
+          market.venue,
+          market.market_id,
+          market.canonical_id,
+          truncateForD1(market.title),
+          truncateForD1(market.topic, 200),
+          market.probability,
+          market.volume,
+          market.liquidity,
+          truncateForD1(market.url, 500),
+          truncateForD1(market.match_key, 200),
+          market.observed_at,
+        ),
+    );
+  }
+
+  await runStatementBatches(db, statements);
+}
+
+export async function saveIngestedPolymarketSnapshot(
+  db: D1Database,
+  pollTs: string,
+  polymarketMarkets: CanonicalMarket[],
+  previousPollTs: string | null,
+): Promise<void> {
+  let kalshiMarkets: CanonicalMarket[] = [];
+  if (previousPollTs && previousPollTs !== pollTs) {
+    const rows = await db
+      .prepare(
+        `SELECT venue, market_id, canonical_id, title, topic, probability, volume, liquidity, url, match_key, observed_at
+         FROM ingested_markets
+         WHERE poll_ts = ? AND venue = 'kalshi'`,
+      )
+      .bind(previousPollTs)
+      .all<{
+        venue: "kalshi";
+        market_id: string;
+        canonical_id: string;
+        title: string;
+        topic: string;
+        probability: number;
+        volume: number | null;
+        liquidity: number | null;
+        url: string;
+        match_key: string;
+        observed_at: string;
+      }>();
+    kalshiMarkets = (rows.results ?? []).map((row) => ({
+      canonical_id: row.canonical_id,
+      title: row.title,
+      topic: row.topic,
+      venue: row.venue,
+      market_id: row.market_id,
+      probability: row.probability,
+      volume: row.volume,
+      liquidity: row.liquidity,
+      url: row.url,
+      observed_at: row.observed_at,
+      match_key: row.match_key,
+    }));
+  }
+
+  await saveIngestedMarketsSnapshot(db, pollTs, [...kalshiMarkets, ...polymarketMarkets]);
+}
+
 
 export async function listIngestedMarkets(
   db: D1Database,
   opts: { venue?: string; search?: string; offset?: number; limit?: number } = {},
 ): Promise<IngestedMarketsPage> {
-  const pollTs = (await getState(db, "last_ingestion_snapshot_ts")) || null;
+  const pollTs = await getLastIngestionPollTs(db);
   const offset = Math.max(0, opts.offset ?? 0);
   const limit = Math.min(200, Math.max(1, opts.limit ?? 50));
   const venue = opts.venue?.trim().toLowerCase();
   const venueClause =
-    venue === "kalshi" || venue === "polymarket" ? " AND m.venue = ?" : "";
-  const search = ingestionSearchClause(opts.search);
-  const searchSql = search.sql
-    ? search.sql.replaceAll("title", "m.title")
-        .replaceAll("topic", "m.topic")
-        .replaceAll("market_id", "m.market_id")
-        .replaceAll("match_key", "m.match_key")
-    : "";
-  const where = `WHERE m.active = 1${venueClause}${searchSql}`;
-  const binds: Array<string | number> = [];
+    venue === "kalshi" || venue === "polymarket" ? " AND im.venue = ?" : "";
+  const search = ingestionSearchClauseForSnapshot(opts.search);
+  const where = pollTs ? `WHERE im.poll_ts = ?${venueClause}${search.sql}` : "WHERE 0";
+  const binds: Array<string | number> = pollTs ? [pollTs] : [];
   if (venueClause) binds.push(venue!);
   binds.push(...search.binds);
 
-  const countRow = await db
-    .prepare(
-      `SELECT COUNT(*) AS c
-       FROM markets m
-       INNER JOIN latest_prices lp ON lp.venue = m.venue AND lp.market_id = m.market_id
-       ${where}`,
-    )
-    .bind(...binds)
-    .first<{ c: number }>();
+  const countRow = pollTs
+    ? await db
+        .prepare(`SELECT COUNT(*) AS c FROM ingested_markets im ${where}`)
+        .bind(...binds)
+        .first<{ c: number }>()
+    : { c: 0 };
 
-  const venueRows = await db
-    .prepare(
-      `SELECT m.venue, COUNT(*) AS c
-       FROM markets m
-       INNER JOIN latest_prices lp ON lp.venue = m.venue AND lp.market_id = m.market_id
-       WHERE m.active = 1
-       GROUP BY m.venue`,
-    )
-    .all<{ venue: string; c: number }>();
   const venueCounts = { kalshi: 0, polymarket: 0 };
-  for (const row of venueRows.results ?? []) {
-    if (row.venue === "kalshi") venueCounts.kalshi = row.c;
-    if (row.venue === "polymarket") venueCounts.polymarket = row.c;
+  if (pollTs) {
+    const venueRows = await db
+      .prepare(
+        `SELECT im.venue, COUNT(*) AS c
+         FROM ingested_markets im
+         WHERE im.poll_ts = ?
+         GROUP BY im.venue`,
+      )
+      .bind(pollTs)
+      .all<{ venue: string; c: number }>();
+    for (const row of venueRows.results ?? []) {
+      if (row.venue === "kalshi") venueCounts.kalshi = row.c;
+      if (row.venue === "polymarket") venueCounts.polymarket = row.c;
+    }
   }
 
-  const rows = await db
-    .prepare(
-      `SELECT m.venue, m.market_id, m.title, m.topic, lp.probability, lp.volume, lp.liquidity,
-              m.url, m.match_key, lp.observed_at
-       FROM markets m
-       INNER JOIN latest_prices lp ON lp.venue = m.venue AND lp.market_id = m.market_id
-       ${where}
-       ORDER BY m.venue ASC, m.title ASC
-       LIMIT ? OFFSET ?`,
-    )
-    .bind(...binds, limit, offset)
-    .all<IngestedMarketRow>();
+  const rows = pollTs
+    ? await db
+        .prepare(
+          `SELECT im.venue, im.market_id, im.title, im.topic, im.probability, im.volume, im.liquidity,
+                  im.url, im.match_key, im.observed_at
+           FROM ingested_markets im
+           ${where}
+           ORDER BY im.venue ASC, im.title ASC
+           LIMIT ? OFFSET ?`,
+        )
+        .bind(...binds, limit, offset)
+        .all<IngestedMarketRow>()
+    : { results: [] as IngestedMarketRow[] };
 
   return {
     poll_ts: pollTs,

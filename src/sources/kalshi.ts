@@ -3,6 +3,7 @@ import {
   verifyKalshiAuthCredentials,
   type KalshiAuthCredentials,
 } from "./kalshi-auth.ts";
+import { buildKalshiMarketUrl } from "../market-urls.ts";
 
 export const KALSHI_BASE_URL = "https://api.elections.kalshi.com/trade-api/v2";
 export const KALSHI_MARKETS_PAGE_LIMIT = 1000;
@@ -166,7 +167,12 @@ export async function fetchKalshiMarkets(
   for (const page of pages) {
     const pageResult = parseKalshiMarketsPage(page.payload);
     for (const row of pageResult.markets) {
-      markets.push({ ...row, venue: "kalshi", fetched_at: fetchedAt });
+      markets.push({
+        ...row,
+        venue: "kalshi",
+        fetched_at: fetchedAt,
+        url: buildKalshiMarketUrl(row),
+      });
     }
   }
 

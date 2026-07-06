@@ -66,7 +66,7 @@ describe("saveKalshiIngest", () => {
         probability: 0.22,
         volume: 1000,
         liquidity: 500,
-        url: "https://kalshi.com/markets/recession-2026",
+        url: "https://kalshi.com/markets/RECESSION-2026",
         observed_at: pollTs,
         match_key: "macro:recession-2026",
       },

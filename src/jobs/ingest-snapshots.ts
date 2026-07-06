@@ -8,7 +8,12 @@ import {
 import { normalizeRawMarket } from "../normalize.ts";
 import { fetchMockMarkets } from "../sources/mock.ts";
 import { fetchPolymarketSnapshot } from "../sources/polymarket.ts";
-import { ensureTables, recordIngestStats } from "../storage.ts";
+import {
+  ensureTables,
+  getLastIngestionPollTs,
+  recordIngestStats,
+  saveIngestedPolymarketSnapshot,
+} from "../storage.ts";
 import type { CanonicalMarket, Env } from "../types.ts";
 import { loadConfig } from "../config.ts";
 import { matchCrossVenue } from "../matcher.ts";
@@ -30,6 +35,7 @@ export interface IngestResult {
 export async function runIngestSnapshots(env: Env): Promise<IngestResult> {
   const config = loadConfig(env);
   const ingestTs = new Date().toISOString();
+  const previousPollTs = await getLastIngestionPollTs(env.DB);
   await ensureTables(env.DB);
 
   const tracked = await loadActiveMarketKeys(env.DB);
@@ -67,6 +73,7 @@ export async function runIngestSnapshots(env: Env): Promise<IngestResult> {
   if (polyKey) r2Keys.push(polyKey);
 
   const priceWrite = await upsertLatestPricesIfChanged(env.DB, scopedMarkets, ingestTs);
+  await saveIngestedPolymarketSnapshot(env.DB, ingestTs, polyMarkets, previousPollTs);
   await recordIngestStats(env.DB, ingestTs, {
     pairs: pairs.length,
     polymarket_markets: polyMarkets.length,

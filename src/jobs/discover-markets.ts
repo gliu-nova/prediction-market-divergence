@@ -1,10 +1,10 @@
 import { archiveKalshiRawPages, archiveMarketSnapshot } from "../archive/r2.ts";
-import { upsertLatestPrices, upsertMarkets, setJobState } from "../d1/tiered.ts";
+import { deactivateMarketsNotInSet, upsertLatestPrices, upsertMarkets, setJobState } from "../d1/tiered.ts";
 import { normalizeRawMarket } from "../normalize.ts";
 import { fetchKalshiMarkets, kalshiAuthFromEnv } from "../sources/kalshi.ts";
 import { fetchMockMarkets } from "../sources/mock.ts";
 import { fetchPolymarketMarkets } from "../sources/polymarket.ts";
-import { ensureTables, recordIngestStats } from "../storage.ts";
+import { ensureTables, recordIngestStats, saveIngestedMarketsSnapshot } from "../storage.ts";
 import type { CanonicalMarket, Env } from "../types.ts";
 import { loadConfig } from "../config.ts";
 import { matchCrossVenue } from "../matcher.ts";
@@ -63,6 +63,9 @@ export async function runDiscoverMarkets(env: Env): Promise<DiscoverResult> {
 
   await upsertMarkets(env.DB, markets, now);
   await upsertLatestPrices(env.DB, markets, now);
+  await saveIngestedMarketsSnapshot(env.DB, now, markets);
+  await deactivateMarketsNotInSet(env.DB, "kalshi", new Set(kalshiMarkets.map((m) => m.market_id)), now);
+  await deactivateMarketsNotInSet(env.DB, "polymarket", new Set(polyMarkets.map((m) => m.market_id)), now);
   await recordIngestStats(env.DB, now, {
     markets: markets.length,
     pairs: pairs.length,
