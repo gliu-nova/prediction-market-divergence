@@ -1,3 +1,4 @@
+import { chunkArray, d1RowsPerStatement, runD1StatementBatches } from "./d1/limits.ts";
 import { loadLatestPricesMarkets, tieredTableStatements } from "./d1/tiered.ts";
 import { matchCrossVenue } from "./matcher.ts";
 import { polyIngestionTableStatements } from "./polymarket/storage-d1";
@@ -152,10 +153,11 @@ async function setState(db: D1Database, key: string, value: string): Promise<voi
 }
 
 async function runStatementBatches(db: D1Database, statements: D1PreparedStatement[]): Promise<void> {
-  for (let i = 0; i < statements.length; i += D1_BATCH_CHUNK_SIZE) {
-    await db.batch(statements.slice(i, i + D1_BATCH_CHUNK_SIZE));
-  }
+  await runD1StatementBatches(db, statements, D1_BATCH_CHUNK_SIZE);
 }
+
+const INGESTED_MARKET_PARAMS_PER_ROW = 12;
+const INGESTED_MARKET_ROWS_PER_STMT = d1RowsPerStatement(INGESTED_MARKET_PARAMS_PER_ROW);
 
 export async function saveObservationsBatched(
   db: D1Database,
@@ -669,32 +671,34 @@ export async function saveIngestedMarketsSnapshot(
   pollTs: string,
   markets: CanonicalMarket[],
 ): Promise<void> {
-  const statements: D1PreparedStatement[] = [
-    db.prepare("DELETE FROM ingested_markets WHERE poll_ts = ?").bind(pollTs),
-  ];
+  await db.prepare("DELETE FROM ingested_markets WHERE poll_ts = ?").bind(pollTs).run();
+  if (!markets.length) return;
 
-  for (const market of markets) {
+  const statements: D1PreparedStatement[] = [];
+  for (const chunk of chunkArray(markets, INGESTED_MARKET_ROWS_PER_STMT)) {
+    const valueClause = chunk.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
+    const binds = chunk.flatMap((market) => [
+      pollTs,
+      market.venue,
+      market.market_id,
+      market.canonical_id,
+      truncateForD1(market.title),
+      truncateForD1(market.topic, 200),
+      market.probability,
+      market.volume,
+      market.liquidity,
+      truncateForD1(market.url, 500),
+      truncateForD1(market.match_key, 200),
+      market.observed_at,
+    ]);
     statements.push(
       db
         .prepare(
           `INSERT INTO ingested_markets
            (poll_ts, venue, market_id, canonical_id, title, topic, probability, volume, liquidity, url, match_key, observed_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES ${valueClause}`,
         )
-        .bind(
-          pollTs,
-          market.venue,
-          market.market_id,
-          market.canonical_id,
-          truncateForD1(market.title),
-          truncateForD1(market.topic, 200),
-          market.probability,
-          market.volume,
-          market.liquidity,
-          truncateForD1(market.url, 500),
-          truncateForD1(market.match_key, 200),
-          market.observed_at,
-        ),
+        .bind(...binds),
     );
   }
 

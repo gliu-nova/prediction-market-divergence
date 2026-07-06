@@ -1,9 +1,10 @@
+import { chunkArray, d1RowsPerStatement, runD1StatementBatches } from "./limits.ts";
 import type { CanonicalMarket, MatchedPair, Signal } from "../types.ts";
 
 const MAX_D1_TEXT_BYTES = 2000;
 const BATCH_CHUNK = 40;
-/** Fewer D1 subrequests: one INSERT per chunk instead of one per row. */
-const MULTI_ROW_CHUNK = 25;
+const LATEST_PRICE_PARAMS_PER_ROW = 8;
+const LATEST_PRICE_ROWS_PER_STMT = d1RowsPerStatement(LATEST_PRICE_PARAMS_PER_ROW);
 
 export type MarketKey = `${string}:${string}`;
 
@@ -20,9 +21,7 @@ function truncate(value: string, maxBytes = MAX_D1_TEXT_BYTES): string {
 }
 
 async function runBatches(db: D1Database, statements: D1PreparedStatement[]): Promise<void> {
-  for (let i = 0; i < statements.length; i += BATCH_CHUNK) {
-    await db.batch(statements.slice(i, i + BATCH_CHUNK));
-  }
+  await runD1StatementBatches(db, statements, BATCH_CHUNK);
 }
 
 export async function loadActiveMarketKeys(db: D1Database): Promise<Set<MarketKey>> {
@@ -172,19 +171,21 @@ async function runMultiRowLatestPriceUpserts(
   ingestTs: string,
 ): Promise<void> {
   if (!markets.length) return;
-  for (let i = 0; i < markets.length; i += MULTI_ROW_CHUNK) {
-    const chunk = markets.slice(i, i + MULTI_ROW_CHUNK);
+  const statements: D1PreparedStatement[] = [];
+  for (const chunk of chunkArray(markets, LATEST_PRICE_ROWS_PER_STMT)) {
     const valueClause = chunk.map(() => "(?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)").join(", ");
     const binds = chunk.flatMap((m) => latestPriceRowBinds(m, ingestTs));
-    await db
-      .prepare(
-        `INSERT INTO latest_prices
-         (venue, market_id, probability, volume, liquidity, best_bid, best_ask, spread, observed_at, ingest_ts)
-         VALUES ${valueClause}${LATEST_PRICE_UPSERT_SUFFIX}`,
-      )
-      .bind(...binds)
-      .run();
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO latest_prices
+           (venue, market_id, probability, volume, liquidity, best_bid, best_ask, spread, observed_at, ingest_ts)
+           VALUES ${valueClause}${LATEST_PRICE_UPSERT_SUFFIX}`,
+        )
+        .bind(...binds),
+    );
   }
+  await runD1StatementBatches(db, statements, BATCH_CHUNK);
 }
 
 function latestPriceChanged(
