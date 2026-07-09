@@ -31,6 +31,6 @@ USE_MOCK = "true"
 # name unless you intentionally migrate polling to Workers.
 
 # Secrets (set in dashboard or via wrangler pages secret put):
-#   POLL_SECRET — required in production for POST /jobs/*, /poll, /maintenance/cleanup
+#   POLL_SECRET — optional bearer token for POST /jobs/*, /poll, /maintenance/cleanup
 #   KALSHI_ACCESS_KEY — Kalshi API key ID (UUID from Kalshi dashboard)
 #   KALSHI_PRIVATE_KEY — Kalshi RSA private key PEM (full file contents)

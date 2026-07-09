@@ -18,10 +18,9 @@ function fakeContext(env: Record<string, string | undefined>, authHeader?: strin
 }
 
 describe("authorizeJob", () => {
-  it("fails closed in production when POLL_SECRET is missing", () => {
+  it("allows requests when POLL_SECRET is missing", () => {
     const denied = authorizeJob(fakeContext({ ENVIRONMENT: "production" }));
-    assert.ok(denied);
-    assert.equal(denied!.status, 503);
+    assert.equal(denied, null);
   });
 
   it("allows preview without a secret", () => {

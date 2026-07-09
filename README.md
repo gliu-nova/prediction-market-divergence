@@ -130,7 +130,7 @@ Pages project → **Settings** → **Bindings**:
 
 | Cloudflare secret name | Value |
 |------------------------|-------|
-| `POLL_SECRET` | Required in production for `POST /jobs/*`, `/poll`, and `/maintenance/cleanup` (optional in preview) |
+| `POLL_SECRET` | Optional bearer token for `POST /jobs/*`, `/poll`, and `/maintenance/cleanup` |
 | `KALSHI_ACCESS_KEY` | Kalshi API key ID (UUID from Kalshi → Account → API) |
 | `KALSHI_PRIVATE_KEY` | Full RSA private key PEM downloaded when the key was created |
 
