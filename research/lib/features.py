@@ -123,7 +123,8 @@ def compute_indicator_summaries(con: duckdb.DuckDBPyConnection, computed_at: str
           JOIN market_snapshots b
             ON a.match_key = b.match_key
            AND a.venue != b.venue
-           AND a.ingest_ts = b.ingest_ts
+           -- Hour bucket (not exact ISO equality) so staggered venue archives still join.
+           AND substr(a.ingest_ts, 1, 13) = substr(b.ingest_ts, 1, 13)
           GROUP BY 1
         )
         SELECT

@@ -7,9 +7,16 @@ function partitionFromTs(ts: string): { day: string; hour: string } {
   return { day: ts.slice(0, 10), hour: ts.slice(11, 13) };
 }
 
-function marketsKey(source: ArchiveSource, ts: string): string {
+function marketsKey(source: ArchiveSource, ts: string, runId?: string): string {
   const { day, hour } = partitionFromTs(ts);
-  return `${source}/markets/${day}/${hour}.jsonl.gz`;
+  // Unique per-run keys avoid lost lines from concurrent read-modify-write appends.
+  const suffix = runId ? `-${runId}` : "";
+  return `${source}/markets/${day}/${hour}${suffix}.jsonl.gz`;
+}
+
+function runIdFromTs(ts: string): string {
+  // Compact unique suffix from ISO timestamp (safe for object keys).
+  return ts.replace(/[-:TZ.]/g, "").slice(0, 14);
 }
 
 function orderbookKey(marketId: string, ts: string): string {
@@ -73,7 +80,7 @@ export async function archiveMarketSnapshot(
   markets: CanonicalMarket[],
 ): Promise<string | null> {
   if (!bucket || !markets.length) return null;
-  const key = marketsKey(source, ingestTs);
+  const key = marketsKey(source, ingestTs, runIdFromTs(ingestTs));
   const payload: IngestArchivePayload = {
     ingest_ts: ingestTs,
     venue: source,
@@ -100,7 +107,8 @@ export async function archiveKalshiRawPages(
   pages: Array<{ pageIndex: number; payload: unknown }>,
 ): Promise<string | null> {
   if (!bucket || !pages.length) return null;
-  const key = marketsKey("kalshi", ingestTs);
+  const { day, hour } = partitionFromTs(ingestTs);
+  const key = `kalshi/raw/${day}/${hour}-${runIdFromTs(ingestTs)}.jsonl.gz`;
   await appendJsonlGz(bucket, key, {
     ingest_ts: ingestTs,
     venue: "kalshi",

@@ -3,7 +3,7 @@ import { deactivateMarketsNotInSet, upsertLatestPrices, upsertMarkets, setJobSta
 import { normalizeRawMarket } from "../normalize.ts";
 import { fetchKalshiMarkets, kalshiAuthFromEnv } from "../sources/kalshi.ts";
 import { fetchMockMarkets } from "../sources/mock.ts";
-import { fetchPolymarketMarkets } from "../sources/polymarket.ts";
+import { fetchPolymarketSnapshot } from "../sources/polymarket.ts";
 import { ensureTables, recordIngestStats, saveIngestedMarketsSnapshot } from "../storage.ts";
 import type { CanonicalMarket, Env } from "../types.ts";
 import { loadConfig } from "../config.ts";
@@ -13,6 +13,8 @@ export interface DiscoverResult {
   markets: number;
   kalshi_markets: number;
   polymarket_markets: number;
+  kalshi_truncated: boolean;
+  polymarket_truncated: boolean;
   r2_keys: string[];
 }
 
@@ -25,19 +27,23 @@ export async function runDiscoverMarkets(env: Env): Promise<DiscoverResult> {
   let kalshiRaw: Record<string, unknown>[] = [];
   let polyRaw: Record<string, unknown>[] = [];
   let kalshiPages: Array<{ pageIndex: number; payload: unknown }> = [];
+  let kalshiTruncated = false;
+  let polymarketTruncated = false;
 
   if (config.useMock) {
     kalshiRaw = fetchMockMarkets("kalshi", now);
     polyRaw = fetchMockMarkets("polymarket", now);
   } else {
     const kalshiAuth = kalshiAuthFromEnv(env);
-    const [kalshiIngest, polymarketRaw] = await Promise.all([
+    const [kalshiIngest, polySnap] = await Promise.all([
       fetchKalshiMarkets(now, { auth: kalshiAuth }),
-      fetchPolymarketMarkets(now, { env: env as unknown as Record<string, string | undefined> }),
+      fetchPolymarketSnapshot(now, { env: env as unknown as Record<string, string | undefined> }),
     ]);
     kalshiRaw = kalshiIngest.markets;
     kalshiPages = kalshiIngest.pages.map((p) => ({ pageIndex: p.pageIndex, payload: p.payload }));
-    polyRaw = polymarketRaw;
+    kalshiTruncated = kalshiIngest.truncated;
+    polyRaw = polySnap.legacyRawMarkets;
+    polymarketTruncated = Boolean(polySnap.truncated);
   }
 
   const markets: CanonicalMarket[] = [];
@@ -73,11 +79,15 @@ export async function runDiscoverMarkets(env: Env): Promise<DiscoverResult> {
     polymarket_markets: polyMarkets.length,
   });
   await setJobState(env.DB, "last_discover_at", now);
+  await setJobState(env.DB, "last_kalshi_truncated", kalshiTruncated ? "1" : "0");
+  await setJobState(env.DB, "last_polymarket_truncated", polymarketTruncated ? "1" : "0");
 
   return {
     markets: markets.length,
     kalshi_markets: kalshiMarkets.length,
     polymarket_markets: polyMarkets.length,
+    kalshi_truncated: kalshiTruncated,
+    polymarket_truncated: polymarketTruncated,
     r2_keys: r2Keys,
   };
 }

@@ -1,11 +1,22 @@
 import type { CanonicalMarket, MatchedPair } from "./types";
 
+function marketRank(market: CanonicalMarket): number {
+  return Math.max(market.volume ?? 0, 0) + Math.max(market.liquidity ?? 0, 0) * 0.25;
+}
+
+/** Prefer the highest volume/liquidity market when a venue has duplicates for a key. */
+function pickPreferred(a: CanonicalMarket, b: CanonicalMarket): CanonicalMarket {
+  return marketRank(b) > marketRank(a) ? b : a;
+}
+
 export function matchCrossVenue(markets: CanonicalMarket[]): MatchedPair[] {
   const byKey = new Map<string, Map<string, CanonicalMarket>>();
 
   for (const market of markets) {
     if (!byKey.has(market.match_key)) byKey.set(market.match_key, new Map());
-    byKey.get(market.match_key)!.set(market.venue, market);
+    const venueMap = byKey.get(market.match_key)!;
+    const existing = venueMap.get(market.venue);
+    venueMap.set(market.venue, existing ? pickPreferred(existing, market) : market);
   }
 
   const pairs: MatchedPair[] = [];

@@ -3,7 +3,7 @@ import { loadLatestPricesMarkets, maxGapsFromIndicators, recordOpportunityEvents
 import { loadConfig } from "../config.ts";
 import { detectCrossVenueWithKeys } from "../divergence.ts";
 import { matchCrossVenue } from "../matcher.ts";
-import { ensureTables, maxHistoricalGapsForPairs, recordDetectResult, syncActiveSignals } from "../storage.ts";
+import { ensureTables, recordDetectResult, syncActiveSignals } from "../storage.ts";
 import type { Env } from "../types.ts";
 
 export interface DetectResult {
@@ -20,15 +20,12 @@ export async function runDetectOpportunities(env: Env): Promise<DetectResult> {
   const markets = await loadLatestPricesMarkets(env.DB);
   const pairs = matchCrossVenue(markets);
 
-  let maxGapByPair = await maxGapsFromIndicators(env.DB, pairs);
-  const needsFallback = [...maxGapByPair.values()].every((v) => v == null);
-  if (needsFallback && pairs.length) {
-    maxGapByPair = await maxHistoricalGapsForPairs(env.DB, pairs, config.lookbackDays, detectTs);
-  }
+  // Rarity uses research-backed indicator_summaries only (observations table is unused).
+  const maxGapByPair = await maxGapsFromIndicators(env.DB, pairs);
 
   const detected = detectCrossVenueWithKeys(config, pairs, maxGapByPair);
   const signals = detected.map((d) => d.signal);
-  await syncActiveSignals(env.DB, signals);
+  await syncActiveSignals(env.DB, signals, config.opportunityMaxAgeHours);
   await recordOpportunityEvents(env.DB, detected);
   await archiveDetectSnapshot(env.HISTORY, detectTs, pairs, signals.length);
   await setJobState(env.DB, "last_detect_at", detectTs);

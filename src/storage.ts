@@ -335,8 +335,12 @@ export async function maxHistoricalGap(
   return computeMaxHistoricalGapFromRows(rows.results, venueA, venueB, excludeSince);
 }
 
-export async function syncActiveSignals(db: D1Database, signals: Signal[]): Promise<void> {
-  const maxAgeCutoff = new Date(Date.now() - 24 * 3600000).toISOString();
+export async function syncActiveSignals(
+  db: D1Database,
+  signals: Signal[],
+  opportunityMaxAgeHours = 24,
+): Promise<void> {
+  const maxAgeCutoff = new Date(Date.now() - opportunityMaxAgeHours * 3600000).toISOString();
   const activeIds = new Set(signals.map((signal) => signal.id));
   const statements: D1PreparedStatement[] = [
     db.prepare("DELETE FROM signals WHERE is_active = 0 AND created_at < ?").bind(maxAgeCutoff),
@@ -419,7 +423,7 @@ export async function getSignals(
     if ((signal.difference_pct_points ?? 0) < minDifferencePctPoints) continue;
     const volA = signal.market_a.volume ?? 0;
     const volB = signal.market_b?.volume ?? 0;
-    if (Math.max(volA, volB) < minVolume) continue;
+    if (Math.min(volA, volB) < minVolume) continue;
     if (venue) {
       const v = venue.toLowerCase();
       const venues = [signal.market_a.venue.toLowerCase(), signal.market_b?.venue.toLowerCase() ?? ""];
@@ -474,7 +478,11 @@ async function signalCountsByVenue(
 
   for (const row of rows.results ?? []) {
     const signal = parseSignal(row);
-    const venues = new Set<string>([signal.market_a.venue, signal.market_b?.venue].filter(Boolean) as string[]);
+    const venues = new Set<string>(
+      [signal.market_a.venue, signal.market_b?.venue]
+        .filter(Boolean)
+        .map((v) => String(v).toLowerCase()),
+    );
     for (const venue of venues) {
       if (venue !== "kalshi" && venue !== "polymarket") continue;
       counts[venue].total += 1;
@@ -523,13 +531,19 @@ export async function getHealth(
   const activeOpportunities = activeRow?.c ?? 0;
   const signalsTotal = totalRow?.c ?? 0;
 
-  const [polyRunStats, signalByVenue] = await Promise.all([
+  const [polyRunStats, signalByVenue, kalshiTruncated, polyTruncated] = await Promise.all([
     latestPolymarketRunStats(db),
     signalCountsByVenue(db),
+    getState(db, "last_kalshi_truncated"),
+    getState(db, "last_polymarket_truncated"),
   ]);
 
   const kalshiIngested = kalshiMarkets;
   const polymarketIngested = polymarketMarkets;
+  const catalogTruncated = {
+    kalshi: kalshiTruncated === "1",
+    polymarket: polyTruncated === "1",
+  };
 
   return {
     status: lastError ? "degraded" : "ok",
@@ -538,6 +552,7 @@ export async function getHealth(
     markets_tracked: marketsTracked,
     active_opportunities: activeOpportunities,
     signals_total: signalsTotal,
+    catalog_truncated: catalogTruncated,
     ingestion: {
       total_markets: marketsTracked,
       kalshi_markets: kalshiMarkets,
@@ -574,6 +589,8 @@ export async function getHealth(
       mode: config.useMock ? "mock" : "live",
       runtime: "cloudflare-pages",
       environment,
+      kalshi_truncated: catalogTruncated.kalshi ? "true" : "false",
+      polymarket_truncated: catalogTruncated.polymarket ? "true" : "false",
     },
   };
 }

@@ -99,9 +99,10 @@ describe("fetchKalshiMarketsPages", () => {
       { markets: [market("C1"), market("C2"), market("C3")], cursor: "" },
     ]);
 
-    const pages = await fetchKalshiMarketsPages({ fetchFn, pageThrottleMs: 0 });
+    const { pages, truncated } = await fetchKalshiMarketsPages({ fetchFn, pageThrottleMs: 0 });
 
     assert.equal(pages.length, 3);
+    assert.equal(truncated, false);
     assert.equal(pages[0]?.pageIndex, 0);
     assert.equal(pages[0]?.requestCursor, null);
     assert.equal(pages[0]?.responseCursor, "page-2");
@@ -129,8 +130,9 @@ describe("fetchKalshiMarketsPages", () => {
       { markets: [market("ONLY")], cursor: null },
     ]);
 
-    const pages = await fetchKalshiMarketsPages({ fetchFn, pageThrottleMs: 0 });
+    const { pages, truncated } = await fetchKalshiMarketsPages({ fetchFn, pageThrottleMs: 0 });
     assert.equal(pages.length, 1);
+    assert.equal(truncated, false);
     assert.equal(urls.length, 1);
   });
 
@@ -141,8 +143,13 @@ describe("fetchKalshiMarketsPages", () => {
       { markets: [market("P3")], cursor: "page-4" },
     ]);
 
-    const pages = await fetchKalshiMarketsPages({ fetchFn, pageThrottleMs: 0, maxPages: 2 });
+    const { pages, truncated } = await fetchKalshiMarketsPages({
+      fetchFn,
+      pageThrottleMs: 0,
+      maxPages: 2,
+    });
     assert.equal(pages.length, 2);
+    assert.equal(truncated, true);
     assert.equal(urls.length, 2);
     assert.equal(pages[1]?.responseCursor, "page-3");
   });
@@ -173,6 +180,7 @@ describe("fetchKalshiMarkets", () => {
     const result = await fetchKalshiMarkets("2026-06-26T00:00:00.000Z", { fetchFn, pageThrottleMs: 0 });
 
     assert.equal(result.pages.length, 2);
+    assert.equal(result.truncated, false);
     assert.equal(result.markets.length, 3);
     assert.equal(result.markets[0]?.ticker, "ONE");
     assert.equal(result.markets[0]?.venue, "kalshi");
@@ -218,8 +226,21 @@ describe("fetchKalshiMarketsPage", () => {
     );
   });
 
-  it("throws immediately for non-retryable errors", async () => {
-    const fetchFn: FetchLike = async () => jsonResponse({ error: "server error" }, 500);
-    await assert.rejects(() => fetchKalshiMarketsPage(null, { fetchFn }), /Kalshi fetch failed: 500/);
+  it("retries 5xx and succeeds on a later attempt", async () => {
+    let calls = 0;
+    const fetchFn: FetchLike = async () => {
+      calls += 1;
+      if (calls < 3) return jsonResponse({ error: "server error" }, 500, { "Retry-After": "0" });
+      return jsonResponse({ markets: [market("RETRY-5XX")], cursor: null });
+    };
+
+    const page = await fetchKalshiMarketsPage(null, { fetchFn, maxRetries: 5 });
+    assert.equal(calls, 3);
+    assert.equal(page.markets[0]?.ticker, "RETRY-5XX");
+  });
+
+  it("throws immediately for non-retryable client errors", async () => {
+    const fetchFn: FetchLike = async () => jsonResponse({ error: "bad request" }, 400);
+    await assert.rejects(() => fetchKalshiMarketsPage(null, { fetchFn }), /Kalshi fetch failed: 400/);
   });
 });

@@ -5,6 +5,7 @@ from __future__ import annotations
 import gzip
 import json
 import subprocess
+from datetime import date, timedelta
 from pathlib import Path
 
 
@@ -41,6 +42,20 @@ def wrangler_r2_get(bucket: str, key: str, dest: Path) -> None:
         raise RuntimeError(f"failed to download {key}: {proc.stderr or proc.stdout}")
 
 
+def iter_dates(since: str, until: str | None) -> list[str]:
+    """Inclusive YYYY-MM-DD range."""
+    start = date.fromisoformat(since)
+    end = date.fromisoformat(until or since)
+    if end < start:
+        start, end = end, start
+    days: list[str] = []
+    cur = start
+    while cur <= end:
+        days.append(cur.isoformat())
+        cur += timedelta(days=1)
+    return days
+
+
 def sync_prefix(bucket: str, prefix: str, cache_dir: Path, verbose: bool = False) -> list[Path]:
     keys = wrangler_r2_list(bucket, prefix)
     downloaded: list[Path] = []
@@ -54,6 +69,22 @@ def sync_prefix(bucket: str, prefix: str, cache_dir: Path, verbose: bool = False
             print(f"download {key}")
         wrangler_r2_get(bucket, key, dest)
         downloaded.append(dest)
+    return downloaded
+
+
+def sync_markets_range(
+    bucket: str,
+    source: str,
+    since: str,
+    until: str | None,
+    cache_dir: Path,
+    verbose: bool = False,
+) -> list[Path]:
+    """Sync `{source}/markets/{day}/...` for each day in [since, until]."""
+    downloaded: list[Path] = []
+    for day in iter_dates(since, until):
+        prefix = f"{source}/markets/{day}"
+        downloaded.extend(sync_prefix(bucket, prefix, cache_dir, verbose=verbose))
     return downloaded
 
 

@@ -15,6 +15,58 @@ const TOPIC_KEYWORDS: Record<string, string> = {
   president: "Politics",
 };
 
+/** Low-signal tokens stripped when building match keys. */
+const MATCH_STOPWORDS = new Set([
+  "a",
+  "an",
+  "the",
+  "will",
+  "be",
+  "is",
+  "are",
+  "in",
+  "on",
+  "at",
+  "by",
+  "of",
+  "to",
+  "for",
+  "and",
+  "or",
+  "vs",
+  "versus",
+  "above",
+  "below",
+  "over",
+  "under",
+  "exceed",
+  "exceeds",
+  "reach",
+  "reaches",
+  "hit",
+  "hits",
+  "end",
+  "ending",
+  "meeting",
+  "odds",
+  "before",
+  "after",
+  "during",
+  "between",
+  "from",
+  "into",
+  "with",
+  "without",
+  "than",
+  "then",
+  "this",
+  "that",
+  "year",
+  "years",
+  "month",
+  "months",
+]);
+
 function slugify(text: string): string {
   return text
     .toLowerCase()
@@ -23,6 +75,28 @@ function slugify(text: string): string {
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
+}
+
+/** Normalize currency / compact number tokens so 100k and 100,000 align. */
+function normalizeNumberToken(token: string): string {
+  const lower = token.toLowerCase();
+  const compact = lower.match(/^(\d+(?:\.\d+)?)([kmb])$/);
+  if (compact) {
+    const n = Number(compact[1]);
+    const mult = compact[2] === "k" ? 1_000 : compact[2] === "m" ? 1_000_000 : 1_000_000_000;
+    return String(Math.round(n * mult));
+  }
+  if (/^\d+$/.test(lower)) return lower.replace(/^0+/, "") || "0";
+  return lower;
+}
+
+/** Light stemming so cut/cuts and rate/rates share a token. */
+function stemToken(token: string): string {
+  if (token.length <= 3) return token;
+  if (token.endsWith("ies") && token.length > 4) return `${token.slice(0, -3)}y`;
+  if (token.endsWith("sses")) return token.slice(0, -2);
+  if (token.endsWith("s") && !token.endsWith("ss") && !token.endsWith("us")) return token.slice(0, -1);
+  return token;
 }
 
 function inferTopic(title: string, explicit?: string): string {
@@ -132,13 +206,21 @@ function extractUrl(raw: Record<string, unknown>, venue: string, marketId: strin
   return "";
 }
 
-function buildMatchKey(title: string, topic: string): string {
-  let titleSlug = slugify(title);
+/**
+ * Build a cross-venue match key from title + topic.
+ * Uses significant stemmed tokens (not raw slug equality) so minor wording
+ * differences between Kalshi and Polymarket titles can still pair.
+ */
+export function buildMatchKey(title: string, topic: string): string {
   const topicSlug = slugify(topic);
-  for (const prefix of ["will-the-", "will-", "us-"]) {
-    if (titleSlug.startsWith(prefix)) titleSlug = titleSlug.slice(prefix.length);
-  }
-  return `${topicSlug}:${titleSlug}`;
+  const tokens = slugify(title)
+    .split("-")
+    .map(normalizeNumberToken)
+    .map(stemToken)
+    .filter((t) => t && !MATCH_STOPWORDS.has(t) && !MATCH_STOPWORDS.has(stemToken(t)));
+  const unique = [...new Set(tokens)].sort();
+  const titleKey = unique.join("-") || slugify(title);
+  return `${topicSlug}:${titleKey}`;
 }
 
 export function normalizeRawMarket(

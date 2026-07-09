@@ -127,4 +127,6 @@ export interface PolymarketSnapshotResult {
   orderBooks: OrderBookSnapshot[];
   trades: Trade[];
   legacyRawMarkets: Record<string, unknown>[];
+  /** True when Gamma discovery hit maxMarkets or maxPages. */
+  truncated?: boolean;
 }

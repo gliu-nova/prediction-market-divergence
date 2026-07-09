@@ -161,7 +161,8 @@ const LATEST_PRICE_UPSERT_SUFFIX = `
    ingest_ts = excluded.ingest_ts`;
 
 function latestPriceRowBinds(m: CanonicalMarket, ingestTs: string): unknown[] {
-  const spread = m.probability != null ? null : null;
+  // best_bid/best_ask are reserved columns; spread is not yet populated from live quotes.
+  const spread: number | null = null;
   return [m.venue, m.market_id, m.probability, m.volume, m.liquidity, spread, m.observed_at, ingestTs];
 }
 
@@ -355,16 +356,29 @@ export async function maxGapsFromIndicators(
   const result = new Map<string, number | null>();
   if (!pairs.length) return result;
 
-  for (const pair of pairs) {
-    const row = await db
+  const matchKeys = [...new Set(pairs.map((p) => p.match_key))];
+  for (const key of matchKeys) result.set(key, null);
+
+  const CHUNK = 40;
+  for (let i = 0; i < matchKeys.length; i += CHUNK) {
+    const chunk = matchKeys.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => "?").join(",");
+    const rows = await db
       .prepare(
-        `SELECT max_gap_30d FROM indicator_summaries
-         WHERE match_key = ?
-         ORDER BY computed_at DESC LIMIT 1`,
+        `SELECT match_key, max_gap_30d FROM indicator_summaries
+         WHERE match_key IN (${placeholders})
+         ORDER BY computed_at DESC`,
       )
-      .bind(pair.match_key)
-      .first<{ max_gap_30d: number | null }>();
-    result.set(pair.match_key, row?.max_gap_30d ?? null);
+      .bind(...chunk)
+      .all<{ match_key: string; max_gap_30d: number | null }>();
+
+    const seen = new Set<string>();
+    for (const row of rows.results ?? []) {
+      // First row per key wins (newest computed_at due to ORDER BY).
+      if (seen.has(row.match_key)) continue;
+      seen.add(row.match_key);
+      result.set(row.match_key, row.max_gap_30d ?? null);
+    }
   }
   return result;
 }

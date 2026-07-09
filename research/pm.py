@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import duckdb
@@ -13,7 +13,7 @@ from rich.progress import Progress
 
 from lib.d1_push import push_indicator_summaries
 from lib.features import compute_indicator_summaries, load_snapshots_into_duckdb
-from lib.r2_sync import sync_prefix
+from lib.r2_sync import sync_markets_range
 
 app = typer.Typer(help="Prediction market research pipeline (R2 → DuckDB → D1)")
 console = Console()
@@ -38,13 +38,12 @@ def sync_r2(
     sources = ["polymarket", "kalshi"] if source == "all" else [source]
     end = until or since
     for src in sources:
-        prefix = f"{src}/markets/{since}"
         if dry_run:
-            console.print(f"[yellow]dry-run[/] would sync s3://{bucket}/{prefix}*")
+            console.print(f"[yellow]dry-run[/] would sync s3://{bucket}/{src}/markets/{{{since}..{end}}}")
             continue
         with Progress() as progress:
             task = progress.add_task(f"sync {src}", total=None)
-            downloaded = sync_prefix(bucket, prefix, cache_dir, verbose=verbose)
+            downloaded = sync_markets_range(bucket, src, since, until, cache_dir, verbose=verbose)
             progress.update(task, completed=1)
         console.print(f"{src}: downloaded {len(downloaded)} objects (since={since}, until={end})")
 
@@ -106,7 +105,7 @@ def run_daily(
 ):
     """Daily batch: sync R2 → DuckDB features → D1 summaries."""
     if since is None:
-        since = (datetime.now(timezone.utc).date().isoformat())
+        since = (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
     sync_r2(source="all", since=since, until=since, bucket=bucket, cache_dir=cache_dir, verbose=False, dry_run=dry_run)
     build_features(since=since, until=since, cache_dir=cache_dir, duckdb_path=duckdb_path, dry_run=dry_run)
     push_d1(since=since, database=database, duckdb_path=duckdb_path, dry_run=dry_run)

@@ -159,7 +159,17 @@ export async function runPolymarketSnapshot(
       truncated: discovery.truncated,
     });
 
-    return { run, events, markets, tokens, priceSnapshots, orderBooks, trades, legacyRawMarkets };
+    return {
+      run,
+      events,
+      markets,
+      tokens,
+      priceSnapshots,
+      orderBooks,
+      trades,
+      legacyRawMarkets,
+      truncated: discovery.truncated,
+    };
   } catch (err) {
     run.status = "error";
     run.error = err instanceof Error ? err.message : String(err);

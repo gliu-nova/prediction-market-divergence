@@ -175,6 +175,10 @@ export interface HealthStatus {
   active_opportunities: number;
   signals_total: number;
   sources: Record<string, string>;
+  catalog_truncated: {
+    kalshi: boolean;
+    polymarket: boolean;
+  };
   ingestion: IngestionSummary;
   output: OutputSummary;
   venues: {

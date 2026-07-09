@@ -54,7 +54,7 @@ Jobs are independent cron triggers — GitHub does not chain them. This is the o
 | 06:30 | R2 → DuckDB → D1 research |
 | 12:00 | Summarize |
 
-Discover can lag ingest by up to 4h for brand-new markets; prices still update every 30 min for markets already in D1.
+Discover can lag ingest by up to 4h for brand-new markets; **prices for both venues** refresh every 30 min for markets already tracked in D1. Detect skips pairs whose observation timestamps differ by more than 60 minutes.
 
 ```
 API fetch → R2 (raw JSONL.gz) + D1 (latest_prices, markets)
@@ -130,7 +130,7 @@ Pages project → **Settings** → **Bindings**:
 
 | Cloudflare secret name | Value |
 |------------------------|-------|
-| `POLL_SECRET` | Optional bearer token for `POST /poll` |
+| `POLL_SECRET` | Required in production for `POST /jobs/*`, `/poll`, and `/maintenance/cleanup` (optional in preview) |
 | `KALSHI_ACCESS_KEY` | Kalshi API key ID (UUID from Kalshi → Account → API) |
 | `KALSHI_PRIVATE_KEY` | Full RSA private key PEM downloaded when the key was created |
 

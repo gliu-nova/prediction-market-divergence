@@ -35,6 +35,7 @@ export interface KalshiIngestPage {
 export interface KalshiIngestResult {
   pages: KalshiIngestPage[];
   markets: Record<string, unknown>[];
+  truncated: boolean;
 }
 
 export type FetchLike = typeof fetch;
@@ -96,6 +97,10 @@ function retryDelayMs(attempt: number, retryAfterHeader: string | null): number 
   return base + Math.floor(Math.random() * base * 0.25);
 }
 
+function isRetryableStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -116,7 +121,7 @@ export async function fetchKalshiMarketsPage(
 
     const resp = await fetchFn(url, { headers });
 
-    if (resp.status === 429 && attempt < maxRetries - 1) {
+    if (isRetryableStatus(resp.status) && attempt < maxRetries - 1) {
       await sleep(retryDelayMs(attempt, resp.headers.get("Retry-After")));
       continue;
     }
@@ -132,12 +137,16 @@ export async function fetchKalshiMarketsPage(
   throw new Error("Kalshi fetch failed: 429");
 }
 
-export async function fetchKalshiMarketsPages(options: KalshiFetchOptions = {}): Promise<KalshiIngestPage[]> {
+export async function fetchKalshiMarketsPages(options: KalshiFetchOptions = {}): Promise<{
+  pages: KalshiIngestPage[];
+  truncated: boolean;
+}> {
   const pageThrottleMs = options.pageThrottleMs ?? KALSHI_PAGE_THROTTLE_MS;
   const maxPages = options.maxPages ?? KALSHI_MAX_PAGES;
   const pages: KalshiIngestPage[] = [];
   let requestCursor: string | null = null;
   let pageIndex = 0;
+  let truncated = false;
 
   while (true) {
     const page = await fetchKalshiMarketsPage(requestCursor, options);
@@ -148,20 +157,24 @@ export async function fetchKalshiMarketsPages(options: KalshiFetchOptions = {}):
       marketCount: page.markets.length,
       payload: page.raw,
     });
-    if (!page.cursor || pages.length >= maxPages) break;
+    if (!page.cursor) break;
+    if (pages.length >= maxPages) {
+      truncated = true;
+      break;
+    }
     requestCursor = page.cursor;
     pageIndex += 1;
     if (pageThrottleMs > 0) await sleep(pageThrottleMs);
   }
 
-  return pages;
+  return { pages, truncated };
 }
 
 export async function fetchKalshiMarkets(
   fetchedAt: string,
   options: KalshiFetchOptions = {},
 ): Promise<KalshiIngestResult> {
-  const pages = await fetchKalshiMarketsPages(options);
+  const { pages, truncated } = await fetchKalshiMarketsPages(options);
   const markets: Record<string, unknown>[] = [];
 
   for (const page of pages) {
@@ -176,7 +189,7 @@ export async function fetchKalshiMarkets(
     }
   }
 
-  return { pages, markets };
+  return { pages, markets, truncated };
 }
 
 export function kalshiAuthFromEnv(env: {

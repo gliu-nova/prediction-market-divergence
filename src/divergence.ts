@@ -1,8 +1,11 @@
-import { scoreDivergence } from "./scoring";
-import type { AppConfig, MatchedPair, Signal } from "./types";
+import { scoreDivergence } from "./scoring.ts";
+import type { AppConfig, MatchedPair, Signal } from "./types.ts";
+
+/** Reject pairs whose venue observations are farther apart than this (ms). */
+export const MAX_OBSERVATION_SKEW_MS = 60 * 60 * 1000;
 
 function lookbackContext(config: AppConfig, diffPp: number, maxGap: number | null): string {
-  if (maxGap == null) return "First cross-venue observation";
+  if (maxGap == null) return "No historical gap data yet";
   if (diffPp > maxGap) return `Largest gap in ${config.lookbackDays} days`;
   return `Within ${config.lookbackDays}-day range (max ${maxGap.toFixed(1)} pp)`;
 }
@@ -20,6 +23,13 @@ function venueLabel(venue: "kalshi" | "polymarket"): string {
   return venue === "kalshi" ? "Kalshi" : "Polymarket";
 }
 
+function observationSkewMs(pair: MatchedPair): number {
+  const a = new Date(pair.market_a.observed_at).getTime();
+  const b = new Date(pair.market_b.observed_at).getTime();
+  if (Number.isNaN(a) || Number.isNaN(b)) return Number.POSITIVE_INFINITY;
+  return Math.abs(a - b);
+}
+
 export interface DetectedSignal {
   signal: Signal;
   match_key: string;
@@ -34,12 +44,15 @@ export function detectCrossVenueWithKeys(
   const results: DetectedSignal[] = [];
 
   for (const pair of pairs) {
+    if (observationSkewMs(pair) > MAX_OBSERVATION_SKEW_MS) continue;
+
     const diffPp = Math.abs(pair.market_a.probability - pair.market_b.probability) * 100;
     if (diffPp < config.minDivergencePctPoints) continue;
 
     const volA = pair.market_a.volume ?? 0;
     const volB = pair.market_b.volume ?? 0;
-    if (Math.max(volA, volB) < config.minVolume) continue;
+    // Require both sides to clear the volume floor (tradability / noise filter).
+    if (Math.min(volA, volB) < config.minVolume) continue;
 
     const maxGap = maxGapByPair.get(pair.match_key) ?? null;
     const observedAt =
@@ -73,6 +86,7 @@ export function detectCrossVenueWithKeys(
           liquidity: pair.market_b.liquidity,
         },
         difference_pct_points: Math.round(diffPp * 10) / 10,
+        // Gap in percentage points — not fee-adjusted arb profit.
         implied_arb_profit_pct: Math.round(diffPp * 10) / 10,
         lookback_context: lookbackContext(config, diffPp, maxGap),
         score,
