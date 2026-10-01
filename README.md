@@ -1,6 +1,6 @@
 # Prediction Market Divergence
 
-Cross-venue prediction market signal engine (Kalshi ↔ Polymarket). Detects probability divergences across venues and exposes ranked opportunities via HTTP for [`twitter-bot`](../twitter-bot) to poll and tweet.
+Cross-venue prediction market signal engine (Kalshi ↔ Polymarket). Detects probability divergences across venues and exposes ranked opportunities via HTTP for [`Cross-Asset-Signal-Engine`](../Cross-Asset-Signal-Engine) to poll and tweet.
 
 ## Tiered architecture
 
@@ -37,7 +37,7 @@ Jobs are independent cron triggers — GitHub does not chain them. This is the o
 ```
 1. Deploy (on push)          → code live on Pages
 2. Discover                  → D1 markets metadata (titles, match keys)
-3. Ingest                    → R2 archives + D1 latest_prices
+3. Ingest                    → changed prices to R2 + D1 latest_prices
 4. Detect                    → D1 signals + opportunity_events (runs immediately after ingest in poll.yml)
 5. Summarize                 → D1 poll_state rollups / freshness checks
 6. Research (R2 → DuckDB)    → D1 indicator_summaries (feeds detect scoring)
@@ -56,8 +56,22 @@ Jobs are independent cron triggers — GitHub does not chain them. This is the o
 
 Discover can lag ingest by up to 4h for brand-new markets; **prices for both venues** refresh every 30 min for markets already tracked in D1. Detect skips pairs whose observation timestamps differ by more than 60 minutes.
 
+### Ingestion caps
+
+One Pages invocation stays inside the 128MB isolate limit. Defaults are clamped in `src/ingest-budget.ts`, so a larger dashboard value cannot reopen the old 5,000-market fetch.
+
+| Cap | Default | Ceiling |
+|-----|---------|---------|
+| Kalshi pages scanned per run | 2 | 3 |
+| Kalshi markets kept (highest volume in those pages) | 400 | 500 |
+| Polymarket markets | 100 | 100 |
+| Polymarket Gamma pages | 2 | 2 |
+| Worker CPU | 60s (`[limits] cpu_ms`) | plan max |
+
+Kalshi is fetched one page at a time and only ticker, title, price, volume, and liquidity are kept. Ingest archives rows whose price changed. Discover writes the capped catalog archive. Neither job stores raw Kalshi pages. Ingest updates the browse snapshot in place and does not copy the previous Kalshi rows.
+
 ```
-API fetch → R2 (raw JSONL.gz) + D1 (latest_prices, markets)
+API fetch → R2 (capped JSONL.gz) + D1 (latest_prices, markets)
          → detect → D1 (signals, opportunity_events)
 R2 cache → DuckDB (features) → D1 (indicator_summaries)
 twitter-bot → GET /opportunities (D1 signals)
@@ -263,7 +277,7 @@ Polymarket data is ingested through modular pipelines under `src/polymarket/`:
 | `d1/tiered.ts` | Cloudflare D1 | `markets`, `latest_prices`, `indicator_summaries`, etc. |
 | `storage-local.ts` | `data/polymarket/` | Local JSON snapshots for CLI workflows |
 
-Ingest writes raw snapshots to R2 and compact live state to D1. Historical price/book detail is **not** stored long-term in D1.
+Discover writes the capped catalog to R2. Ingest writes only changed prices. Compact live state stays in D1. Historical price/book detail is **not** stored long-term in D1.
 
 ### Environment variables
 
@@ -273,8 +287,10 @@ Ingest writes raw snapshots to R2 and compact live state to D1. Historical price
 | `POLYMARKET_CLOB_URL` | `https://clob.polymarket.com` | Prices + books |
 | `POLYMARKET_CLOB_WS_URL` | `wss://ws-subscriptions-clob.polymarket.com/ws/market` | CLI streaming |
 | `POLYMARKET_DATA_API_URL` | `https://data-api.polymarket.com` | Trades backfill |
-| `POLYMARKET_MAX_MARKETS` | `100` | Max markets per poll/snapshot |
-| `POLYMARKET_MAX_GAMMA_PAGES` | `2` | Gamma pagination cap (Workers-safe) |
+| `KALSHI_MAX_PAGES` | `2` | Kalshi pages scanned per run (ceiling 3) |
+| `KALSHI_MAX_MARKETS` | `400` | Kalshi markets kept per run (ceiling 500) |
+| `POLYMARKET_MAX_MARKETS` | `100` | Max markets per poll/snapshot (ceiling 100) |
+| `POLYMARKET_MAX_GAMMA_PAGES` | `2` | Gamma pagination cap (ceiling 2) |
 | `POLYMARKET_CLOB_ENRICH_MAX` | `100` | Max markets enriched via CLOB batch prices |
 | `POLYMARKET_RATE_LIMIT_MS` | `100` | Minimum interval between outbound requests |
 | `POLYGON_RPC_URL` | _(unset)_ | Optional; on-chain lookups are stubbed in v1 |
@@ -326,7 +342,8 @@ Migration: `npm run db:remote:tiered`. Tables are also auto-created by `ensureTa
 |---------|---------------------|----------------------|
 | Cloudflare Pages | 500 builds/month, unlimited requests | 1 deploy per push; API reads low |
 | Cloudflare Pages Functions | 100k requests/day | ~96 job POSTs/day (48 ingest + 48 detect) + API traffic |
-| Cloudflare D1 | 5M rows read/day, 100k writes/day | Compact live rows only |
+| Cloudflare D1 | 5M rows read/day, 100k writes/day | Capped live rows. Ingest does not rewrite the Kalshi snapshot |
+| Cloudflare Workers CPU | 30s default on paid | This project sets `cpu_ms = 60000` |
 | Cloudflare R2 | 10 GB storage free | Raw JSONL.gz archives |
 | GitHub Actions | 2000 min/month (private repos) | Deploy + ingest/detect/discover/summarize/research |
 

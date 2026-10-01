@@ -215,8 +215,8 @@ export async function upsertLatestPricesIfChanged(
   db: D1Database,
   markets: CanonicalMarket[],
   ingestTs: string,
-): Promise<{ written: number; skipped: number }> {
-  if (!markets.length) return { written: 0, skipped: 0 };
+): Promise<{ written: number; skipped: number; changed: CanonicalMarket[] }> {
+  if (!markets.length) return { written: 0, skipped: 0, changed: [] };
 
   const existing = new Map<string, { probability: number; volume: number | null; liquidity: number | null }>();
   const rows = await db
@@ -244,7 +244,7 @@ export async function upsertLatestPricesIfChanged(
   }
 
   await runMultiRowLatestPriceUpserts(db, toWrite, ingestTs);
-  return { written: toWrite.length, skipped };
+  return { written: toWrite.length, skipped, changed: toWrite };
 }
 
 export async function deactivateMarketsNotInSet(
@@ -259,18 +259,24 @@ export async function deactivateMarketsNotInSet(
     .all<{ market_id: string }>();
 
   const statements: D1PreparedStatement[] = [];
+  let deactivated = 0;
   for (const row of rows.results ?? []) {
-    if (!keepMarketIds.has(row.market_id)) {
-      statements.push(
-        db
-          .prepare("UPDATE markets SET active = 0, updated_at = ? WHERE venue = ? AND market_id = ?")
-          .bind(now, venue, row.market_id),
-      );
+    if (keepMarketIds.has(row.market_id)) continue;
+    statements.push(
+      db
+        .prepare("UPDATE markets SET active = 0, updated_at = ? WHERE venue = ? AND market_id = ?")
+        .bind(now, venue, row.market_id),
+    );
+    deactivated += 1;
+    // Flush as we go. The first capped discover deactivates thousands of old rows.
+    if (statements.length >= BATCH_CHUNK) {
+      await runBatches(db, statements);
+      statements.length = 0;
     }
   }
 
   if (statements.length) await runBatches(db, statements);
-  return statements.length;
+  return deactivated;
 }
 
 export async function loadLatestPricesMarkets(db: D1Database): Promise<CanonicalMarket[]> {

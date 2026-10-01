@@ -608,12 +608,17 @@ export async function recordIngestStats(
     poly_markets_enriched?: number | null;
     poly_snapshots_stored?: number | null;
   },
+  options: { advanceSnapshotTs?: boolean } = {},
 ): Promise<void> {
-  const statements: D1PreparedStatement[] = [
-    db
-      .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
-      .bind("last_ingestion_snapshot_ts", ingestTs),
-  ];
+  const statements: D1PreparedStatement[] = [];
+  // Price refresh must not move the browse snapshot pointer. Discover owns that timestamp.
+  if (options.advanceSnapshotTs !== false) {
+    statements.push(
+      db
+        .prepare("INSERT INTO poll_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+        .bind("last_ingestion_snapshot_ts", ingestTs),
+    );
+  }
 
   if (result.markets != null) {
     statements.push(
@@ -683,14 +688,12 @@ export async function getLastIngestionPollTs(db: D1Database): Promise<string | n
   return value || null;
 }
 
-export async function saveIngestedMarketsSnapshot(
+async function insertIngestedMarketRows(
   db: D1Database,
   pollTs: string,
   markets: CanonicalMarket[],
 ): Promise<void> {
-  await db.prepare("DELETE FROM ingested_markets WHERE poll_ts = ?").bind(pollTs).run();
   if (!markets.length) return;
-
   const statements: D1PreparedStatement[] = [];
   for (const chunk of chunkArray(markets, INGESTED_MARKET_ROWS_PER_STMT)) {
     const valueClause = chunk.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
@@ -722,50 +725,28 @@ export async function saveIngestedMarketsSnapshot(
   await runStatementBatches(db, statements);
 }
 
-export async function saveIngestedPolymarketSnapshot(
+export async function saveIngestedMarketsSnapshot(
   db: D1Database,
   pollTs: string,
-  polymarketMarkets: CanonicalMarket[],
-  previousPollTs: string | null,
+  markets: CanonicalMarket[],
 ): Promise<void> {
-  let kalshiMarkets: CanonicalMarket[] = [];
-  if (previousPollTs && previousPollTs !== pollTs) {
-    const rows = await db
-      .prepare(
-        `SELECT venue, market_id, canonical_id, title, topic, probability, volume, liquidity, url, match_key, observed_at
-         FROM ingested_markets
-         WHERE poll_ts = ? AND venue = 'kalshi'`,
-      )
-      .bind(previousPollTs)
-      .all<{
-        venue: "kalshi";
-        market_id: string;
-        canonical_id: string;
-        title: string;
-        topic: string;
-        probability: number;
-        volume: number | null;
-        liquidity: number | null;
-        url: string;
-        match_key: string;
-        observed_at: string;
-      }>();
-    kalshiMarkets = (rows.results ?? []).map((row) => ({
-      canonical_id: row.canonical_id,
-      title: row.title,
-      topic: row.topic,
-      venue: row.venue,
-      market_id: row.market_id,
-      probability: row.probability,
-      volume: row.volume,
-      liquidity: row.liquidity,
-      url: row.url,
-      observed_at: row.observed_at,
-      match_key: row.match_key,
-    }));
-  }
+  await db.prepare("DELETE FROM ingested_markets WHERE poll_ts = ?").bind(pollTs).run();
+  await insertIngestedMarketRows(db, pollTs, markets);
+}
 
-  await saveIngestedMarketsSnapshot(db, pollTs, [...kalshiMarkets, ...polymarketMarkets]);
+/** Replace one venue inside the current browse snapshot. Does not copy the other venue. */
+export async function replaceIngestedVenueSnapshot(
+  db: D1Database,
+  pollTs: string,
+  venue: "kalshi" | "polymarket",
+  markets: CanonicalMarket[],
+): Promise<void> {
+  await db.prepare("DELETE FROM ingested_markets WHERE poll_ts = ? AND venue = ?").bind(pollTs, venue).run();
+  await insertIngestedMarketRows(
+    db,
+    pollTs,
+    markets.filter((market) => market.venue === venue),
+  );
 }
 
 

@@ -73,6 +73,15 @@ export interface IngestArchivePayload {
   }>;
 }
 
+async function putJsonlGz(bucket: R2Bucket, key: string, record: unknown): Promise<void> {
+  const line = `${JSON.stringify(record)}\n`;
+  const compressed = await gzipText(line);
+  await bucket.put(key, compressed, {
+    httpMetadata: { contentType: "application/gzip" },
+    customMetadata: { format: "jsonl.gz" },
+  });
+}
+
 export async function archiveMarketSnapshot(
   bucket: R2Bucket | undefined,
   source: ArchiveSource,
@@ -97,25 +106,8 @@ export async function archiveMarketSnapshot(
       observed_at: m.observed_at,
     })),
   };
-  await appendJsonlGz(bucket, key, payload);
-  return key;
-}
-
-export async function archiveKalshiRawPages(
-  bucket: R2Bucket | undefined,
-  ingestTs: string,
-  pages: Array<{ pageIndex: number; payload: unknown }>,
-): Promise<string | null> {
-  if (!bucket || !pages.length) return null;
-  const { day, hour } = partitionFromTs(ingestTs);
-  const key = `kalshi/raw/${day}/${hour}-${runIdFromTs(ingestTs)}.jsonl.gz`;
-  await appendJsonlGz(bucket, key, {
-    ingest_ts: ingestTs,
-    venue: "kalshi",
-    type: "raw_pages",
-    page_count: pages.length,
-    pages,
-  });
+  // Unique per-run key. Write once so we do not read an existing object back into memory.
+  await putJsonlGz(bucket, key, payload);
   return key;
 }
 

@@ -1,3 +1,11 @@
+import {
+  clampInt,
+  POLYMARKET_MAX_GAMMA_PAGES,
+  POLYMARKET_MAX_GAMMA_PAGES_CEILING,
+  POLYMARKET_MAX_MARKETS,
+  POLYMARKET_MAX_MARKETS_CEILING,
+} from "../ingest-budget.ts";
+
 export interface PolymarketEndpoints {
   gammaBaseUrl: string;
   clobBaseUrl: string;
@@ -38,9 +46,24 @@ export function polymarketConfigFromEnv(env: Record<string, string | undefined> 
       polygonRpcUrl: env.POLYGON_RPC_URL ?? null,
     },
     discoveryPageSize: parseInt(env.POLYMARKET_PAGE_SIZE ?? "100", 10),
-    discoveryMaxMarkets: parseInt(env.POLYMARKET_MAX_MARKETS ?? "100", 10),
-    maxGammaPages: parseInt(env.POLYMARKET_MAX_GAMMA_PAGES ?? "2", 10),
-    clobEnrichMaxMarkets: parseInt(env.POLYMARKET_CLOB_ENRICH_MAX ?? "100", 10),
+    discoveryMaxMarkets: clampInt(
+      parseInt(env.POLYMARKET_MAX_MARKETS ?? "", 10),
+      1,
+      POLYMARKET_MAX_MARKETS_CEILING,
+      POLYMARKET_MAX_MARKETS,
+    ),
+    maxGammaPages: clampInt(
+      parseInt(env.POLYMARKET_MAX_GAMMA_PAGES ?? "", 10),
+      1,
+      POLYMARKET_MAX_GAMMA_PAGES_CEILING,
+      POLYMARKET_MAX_GAMMA_PAGES,
+    ),
+    clobEnrichMaxMarkets: clampInt(
+      parseInt(env.POLYMARKET_CLOB_ENRICH_MAX ?? "", 10),
+      1,
+      POLYMARKET_MAX_MARKETS_CEILING,
+      POLYMARKET_MAX_MARKETS,
+    ),
     orderBookDepth: parseInt(env.POLYMARKET_ORDER_BOOK_DEPTH ?? "10", 10),
     maxRetries: parseInt(env.POLYMARKET_MAX_RETRIES ?? "5", 10),
     retryBaseMs: parseInt(env.POLYMARKET_RETRY_BASE_MS ?? "500", 10),

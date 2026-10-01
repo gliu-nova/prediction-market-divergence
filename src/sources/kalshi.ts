@@ -1,14 +1,15 @@
+import { KALSHI_MAX_MARKETS, KALSHI_MAX_PAGES, capByVolume } from "../ingest-budget.ts";
+import { buildKalshiMarketUrl } from "../market-urls.ts";
 import {
   createKalshiAuthHeaders,
   verifyKalshiAuthCredentials,
   type KalshiAuthCredentials,
 } from "./kalshi-auth.ts";
-import { buildKalshiMarketUrl } from "../market-urls.ts";
 
 export const KALSHI_BASE_URL = "https://api.elections.kalshi.com/trade-api/v2";
 export const KALSHI_MARKETS_PAGE_LIMIT = 1000;
-/** Stay under Cloudflare Workers subrequest limit (50 free / 1000 paid), including Kalshi fetches + D1. */
-export const KALSHI_MAX_PAGES = 5;
+/** Re-export so callers share the ingest budget. Default is 2 pages, not the old 5. */
+export { KALSHI_MAX_PAGES };
 export const KALSHI_PAGE_THROTTLE_MS = 1500;
 export const KALSHI_MAX_RETRIES = 2;
 export const KALSHI_RETRY_BASE_MS = 1000;
@@ -45,7 +46,53 @@ export interface KalshiFetchOptions {
   pageThrottleMs?: number;
   maxRetries?: number;
   maxPages?: number;
+  /** Markets kept after the scan. Highest volume wins. */
+  maxMarkets?: number;
   auth?: KalshiAuthCredentials;
+}
+
+const KALSHI_SLIM_KEYS = [
+  "ticker",
+  "market_ticker",
+  "event_ticker",
+  "series_ticker",
+  "title",
+  "event_title",
+  "yes_price",
+  "yes_bid_dollars",
+  "yes_ask_dollars",
+  "last_price_dollars",
+  "last_price",
+  "yes_bid",
+  "volume",
+  "volume_fp",
+  "volume_24h_fp",
+  "volume_24h",
+  "volumeNum",
+  "liquidity",
+  "liquidity_dollars",
+  "open_interest",
+] as const;
+
+/** Keep the fields normalization reads. Drop rules text and other fat API fields. */
+export function projectKalshiMarket(row: Record<string, unknown>, fetchedAt: string): Record<string, unknown> {
+  const slim: Record<string, unknown> = {
+    venue: "kalshi",
+    fetched_at: fetchedAt,
+    url: buildKalshiMarketUrl(row),
+  };
+  for (const key of KALSHI_SLIM_KEYS) {
+    if (row[key] != null && row[key] !== "") slim[key] = row[key];
+  }
+  return slim;
+}
+
+export function kalshiRawVolume(row: Record<string, unknown>): number {
+  for (const key of ["volume_fp", "volume", "volume_24h_fp", "volume_24h", "volumeNum"] as const) {
+    const n = Number(row[key]);
+    if (Number.isFinite(n)) return n;
+  }
+  return 0;
 }
 
 export function isMveParlayMarket(raw: Record<string, unknown>): boolean {
@@ -174,22 +221,86 @@ export async function fetchKalshiMarkets(
   fetchedAt: string,
   options: KalshiFetchOptions = {},
 ): Promise<KalshiIngestResult> {
-  const { pages, truncated } = await fetchKalshiMarketsPages(options);
+  const pageThrottleMs = options.pageThrottleMs ?? KALSHI_PAGE_THROTTLE_MS;
+  const maxPages = options.maxPages ?? KALSHI_MAX_PAGES;
+  const pages: KalshiIngestPage[] = [];
   const markets: Record<string, unknown>[] = [];
+  let requestCursor: string | null = null;
+  let truncated = false;
 
-  for (const page of pages) {
-    const pageResult = parseKalshiMarketsPage(page.payload);
-    for (const row of pageResult.markets) {
-      markets.push({
-        ...row,
-        venue: "kalshi",
-        fetched_at: fetchedAt,
-        url: buildKalshiMarketUrl(row),
-      });
+  while (pages.length < maxPages) {
+    const page = await fetchKalshiMarketsPage(requestCursor, options);
+    for (const row of page.markets) {
+      markets.push(projectKalshiMarket(row, fetchedAt));
     }
+    pages.push({
+      pageIndex: pages.length,
+      requestCursor,
+      responseCursor: page.cursor,
+      marketCount: page.markets.length,
+      // Do not retain the raw page. Rules text alone is ~35% of the payload.
+      payload: { cursor: page.cursor, markets: [] },
+    });
+    if (!page.cursor) break;
+    if (pages.length >= maxPages) {
+      truncated = true;
+      break;
+    }
+    requestCursor = page.cursor;
+    if (pageThrottleMs > 0) await sleep(pageThrottleMs);
   }
 
   return { pages, markets, truncated };
+}
+
+export interface KalshiBoundedResult {
+  markets: Record<string, unknown>[];
+  truncated: boolean;
+  pages_fetched: number;
+}
+
+/**
+ * Fetch one Kalshi page at a time, project it down to slim rows, then drop the
+ * page before the next request. Keeps at most `maxMarkets` by volume.
+ */
+export async function fetchKalshiMarketsBounded(
+  fetchedAt: string,
+  options: KalshiFetchOptions = {},
+): Promise<KalshiBoundedResult> {
+  const pageThrottleMs = options.pageThrottleMs ?? KALSHI_PAGE_THROTTLE_MS;
+  const maxPages = options.maxPages ?? KALSHI_MAX_PAGES;
+  const maxMarkets = options.maxMarkets ?? KALSHI_MAX_MARKETS;
+  let kept: Record<string, unknown>[] = [];
+  let requestCursor: string | null = null;
+  let pagesFetched = 0;
+  let truncated = false;
+  let dropped = false;
+
+  while (pagesFetched < maxPages) {
+    const page = await fetchKalshiMarketsPage(requestCursor, options);
+    pagesFetched += 1;
+    const slim: Record<string, unknown>[] = [];
+    for (const row of page.markets) {
+      slim.push(projectKalshiMarket(row, fetchedAt));
+    }
+    const cursor = page.cursor;
+    const combined = kept.concat(slim);
+    if (combined.length > maxMarkets) dropped = true;
+    kept = capByVolume(combined, maxMarkets, kalshiRawVolume);
+
+    if (!cursor) {
+      truncated = dropped;
+      break;
+    }
+    if (pagesFetched >= maxPages) {
+      truncated = true;
+      break;
+    }
+    requestCursor = cursor;
+    if (pageThrottleMs > 0) await sleep(pageThrottleMs);
+  }
+
+  return { markets: kept, truncated, pages_fetched: pagesFetched };
 }
 
 export function kalshiAuthFromEnv(env: {

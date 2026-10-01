@@ -17,6 +17,8 @@ export interface Env {
   POLYMARKET_CLOB_URL?: string;
   POLYMARKET_CLOB_WS_URL?: string;
   POLYMARKET_DATA_API_URL?: string;
+  KALSHI_MAX_PAGES?: string;
+  KALSHI_MAX_MARKETS?: string;
   POLYMARKET_PAGE_SIZE?: string;
   POLYMARKET_MAX_MARKETS?: string;
   POLYMARKET_MAX_GAMMA_PAGES?: string;

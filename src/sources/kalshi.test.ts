@@ -3,10 +3,12 @@ import { describe, it } from "node:test";
 import {
   buildKalshiMarketsUrl,
   fetchKalshiMarkets,
+  fetchKalshiMarketsBounded,
   fetchKalshiMarketsPage,
   fetchKalshiMarketsPages,
   filterMveParlayMarkets,
   isMveParlayMarket,
+  projectKalshiMarket,
   KALSHI_MARKETS_PAGE_LIMIT,
   KALSHI_MAX_PAGES,
   type FetchLike,
@@ -99,7 +101,7 @@ describe("fetchKalshiMarketsPages", () => {
       { markets: [market("C1"), market("C2"), market("C3")], cursor: "" },
     ]);
 
-    const { pages, truncated } = await fetchKalshiMarketsPages({ fetchFn, pageThrottleMs: 0 });
+    const { pages, truncated } = await fetchKalshiMarketsPages({ fetchFn, pageThrottleMs: 0, maxPages: 5 });
 
     assert.equal(pages.length, 3);
     assert.equal(truncated, false);
@@ -155,7 +157,7 @@ describe("fetchKalshiMarketsPages", () => {
   });
 
   it("defaults maxPages to KALSHI_MAX_PAGES", () => {
-    assert.equal(KALSHI_MAX_PAGES, 5);
+    assert.equal(KALSHI_MAX_PAGES, 2);
   });
 
   it("waits between pages when pageThrottleMs is set", async () => {
@@ -200,6 +202,62 @@ describe("fetchKalshiMarkets", () => {
     const result = await fetchKalshiMarkets("2026-06-26T00:00:00.000Z", { fetchFn, pageThrottleMs: 0 });
     assert.equal(result.markets.length, 1);
     assert.equal(result.markets[0]?.ticker, "KXFED-27APR-T3.75");
+  });
+
+  it("drops fat fields the worker does not read", () => {
+    const slim = projectKalshiMarket(
+      {
+        ticker: "KXFED-27APR-T3.75",
+        title: "Fed",
+        rules_primary: "x".repeat(8000),
+        rules_secondary: "y".repeat(8000),
+        volume_fp: "1200",
+      },
+      "2026-10-01T00:00:00.000Z",
+    );
+    assert.equal(slim.ticker, "KXFED-27APR-T3.75");
+    assert.equal(slim.volume_fp, "1200");
+    assert.equal("rules_primary" in slim, false);
+    assert.equal("rules_secondary" in slim, false);
+  });
+});
+
+describe("fetchKalshiMarketsBounded", () => {
+  it("keeps the highest-volume markets and does not retain rules text", async () => {
+    const { fetchFn, urls } = createPaginatedFetch([
+      {
+        markets: [
+          { ...market("LOW"), volume_fp: "1", rules_primary: "fat" },
+          { ...market("HIGH"), volume_fp: "900", rules_primary: "fat" },
+        ],
+        cursor: "page-2",
+      },
+      {
+        markets: [{ ...market("MID"), volume_fp: "50", rules_secondary: "fat" }],
+        cursor: "page-3",
+      },
+      {
+        markets: [{ ...market("UNSEEN"), volume_fp: "9999" }],
+        cursor: null,
+      },
+    ]);
+
+    const result = await fetchKalshiMarketsBounded("2026-10-01T00:00:00.000Z", {
+      fetchFn,
+      pageThrottleMs: 0,
+      maxPages: 2,
+      maxMarkets: 2,
+    });
+
+    assert.deepEqual(
+      result.markets.map((row) => row.ticker),
+      ["HIGH", "MID"],
+    );
+    assert.equal(result.pages_fetched, 2);
+    assert.equal(result.truncated, true);
+    assert.equal(urls.length, 2);
+    assert.equal("rules_primary" in (result.markets[0] ?? {}), false);
+    assert.equal("rules_secondary" in (result.markets[1] ?? {}), false);
   });
 });
 
