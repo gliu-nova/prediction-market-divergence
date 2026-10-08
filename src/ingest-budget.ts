@@ -1,11 +1,12 @@
 /**
  * Hard caps for one Pages Function invocation.
- * The isolate has 128MB of memory. A single Kalshi page is ~2.4MB of JSON
- * and about 43 fields per market, so unbounded catalog fetches get killed
- * with Cloudflare error 1102.
+ * The isolate has 128MB of memory. Kalshi has no field mask, so each page is
+ * parsed whole (rules text included) and then discarded. One page of 400
+ * markets stays under that cap. The old 1,000-market pages were killed with
+ * Cloudflare error 1102.
  */
 
-export const KALSHI_MAX_PAGES = 2;
+export const KALSHI_MAX_PAGES = 1;
 export const KALSHI_MAX_PAGES_CEILING = 3;
 export const KALSHI_MAX_MARKETS = 400;
 export const KALSHI_MAX_MARKETS_CEILING = 500;

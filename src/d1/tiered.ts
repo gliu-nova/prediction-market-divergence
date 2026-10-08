@@ -1,4 +1,4 @@
-import { chunkArray, d1RowsPerStatement, runD1StatementBatches } from "./limits.ts";
+import { chunkArray, D1_MAX_BOUND_PARAMS, d1RowsPerStatement, runD1StatementBatches } from "./limits.ts";
 import type { CanonicalMarket, MatchedPair, Signal } from "../types.ts";
 
 const MAX_D1_TEXT_BYTES = 2000;
@@ -210,6 +210,52 @@ export async function upsertLatestPrices(
   return markets.length;
 }
 
+type LatestPricePrior = {
+  probability: number;
+  volume: number | null;
+  liquidity: number | null;
+};
+
+/** One bind is the venue. The rest are market ids, under D1's 100-parameter cap. */
+const PRICE_ID_CHUNK = D1_MAX_BOUND_PARAMS - 1;
+
+/** Priors for this write set only. Do not scan the whole latest_prices table. */
+async function loadLatestPricePriors(
+  db: D1Database,
+  markets: CanonicalMarket[],
+): Promise<Map<string, LatestPricePrior>> {
+  const existing = new Map<string, LatestPricePrior>();
+  const idsByVenue = new Map<CanonicalMarket["venue"], string[]>();
+  for (const market of markets) {
+    const ids = idsByVenue.get(market.venue) ?? [];
+    if (!ids.includes(market.market_id)) ids.push(market.market_id);
+    idsByVenue.set(market.venue, ids);
+  }
+
+  for (const [venue, ids] of idsByVenue) {
+    for (const chunk of chunkArray(ids, PRICE_ID_CHUNK)) {
+      const placeholders = chunk.map(() => "?").join(", ");
+      const rows = await db
+        .prepare(
+          `SELECT venue, market_id, probability, volume, liquidity FROM latest_prices
+           WHERE venue = ? AND market_id IN (${placeholders})`,
+        )
+        .bind(venue, ...chunk)
+        .all<{
+          venue: string;
+          market_id: string;
+          probability: number;
+          volume: number | null;
+          liquidity: number | null;
+        }>();
+      for (const row of rows.results ?? []) {
+        existing.set(marketKey(row.venue, row.market_id), row);
+      }
+    }
+  }
+  return existing;
+}
+
 /** Write only rows whose price/volume/liquidity changed (or are new). */
 export async function upsertLatestPricesIfChanged(
   db: D1Database,
@@ -218,19 +264,7 @@ export async function upsertLatestPricesIfChanged(
 ): Promise<{ written: number; skipped: number; changed: CanonicalMarket[] }> {
   if (!markets.length) return { written: 0, skipped: 0, changed: [] };
 
-  const existing = new Map<string, { probability: number; volume: number | null; liquidity: number | null }>();
-  const rows = await db
-    .prepare("SELECT venue, market_id, probability, volume, liquidity FROM latest_prices")
-    .all<{
-      venue: string;
-      market_id: string;
-      probability: number;
-      volume: number | null;
-      liquidity: number | null;
-    }>();
-  for (const row of rows.results ?? []) {
-    existing.set(marketKey(row.venue, row.market_id), row);
-  }
+  const existing = await loadLatestPricePriors(db, markets);
 
   const toWrite: CanonicalMarket[] = [];
   let skipped = 0;

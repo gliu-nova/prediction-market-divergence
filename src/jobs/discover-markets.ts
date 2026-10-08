@@ -1,12 +1,12 @@
 import { archiveMarketSnapshot } from "../archive/r2.ts";
 import { loadConfig } from "../config.ts";
 import { deactivateMarketsNotInSet, setJobState, upsertLatestPrices, upsertMarkets } from "../d1/tiered.ts";
-import { capByVolume, ingestBudgetFromEnv, slimPolymarketRaw } from "../ingest-budget.ts";
+import { capByVolume, ingestBudgetFromEnv } from "../ingest-budget.ts";
 import { matchCrossVenue } from "../matcher.ts";
 import { normalizeRawMarket } from "../normalize.ts";
 import { fetchMockMarkets } from "../sources/mock.ts";
 import { fetchKalshiMarketsBounded, kalshiAuthFromEnv } from "../sources/kalshi.ts";
-import { fetchPolymarketSnapshot } from "../sources/polymarket.ts";
+import { fetchPolymarketIngestRows } from "../sources/polymarket.ts";
 import { ensureTables, recordIngestStats, saveIngestedMarketsSnapshot } from "../storage.ts";
 import type { CanonicalMarket, Env } from "../types.ts";
 
@@ -43,34 +43,39 @@ export async function runDiscoverMarkets(env: Env): Promise<DiscoverResult> {
   const now = new Date().toISOString();
   await ensureTables(env.DB);
 
-  let kalshiRaw: Record<string, unknown>[] = [];
-  let polyRaw: Record<string, unknown>[] = [];
+  let kalshiMarkets: CanonicalMarket[] = [];
+  let polyMarkets: CanonicalMarket[] = [];
   let kalshiTruncated = false;
   let polymarketTruncated = false;
 
   if (config.useMock) {
-    kalshiRaw = fetchMockMarkets("kalshi", now);
-    polyRaw = fetchMockMarkets("polymarket", now);
+    kalshiMarkets = capVenue(normalizeAll(fetchMockMarkets("kalshi", now), now), "kalshi", budget.kalshiMaxMarkets);
+    polyMarkets = capVenue(
+      normalizeAll(fetchMockMarkets("polymarket", now), now),
+      "polymarket",
+      budget.polymarketMaxMarkets,
+    );
   } else {
-    const kalshi = await fetchKalshiMarketsBounded(now, {
-      auth: kalshiAuthFromEnv(env),
-      maxPages: budget.kalshiMaxPages,
-      maxMarkets: budget.kalshiMaxMarkets,
-    });
-    kalshiRaw = kalshi.markets;
-    kalshiTruncated = kalshi.truncated;
-
-    const polySnap = await fetchPolymarketSnapshot(now, {
-      env: env as unknown as Record<string, string | undefined>,
-      maxMarkets: budget.polymarketMaxMarkets,
-      includeOrderBooks: false,
-    });
-    polyRaw = polySnap.legacyRawMarkets.map(slimPolymarketRaw);
-    polymarketTruncated = Boolean(polySnap.truncated);
+    // Project each venue before the next fetch so the raw page is not retained.
+    {
+      const kalshi = await fetchKalshiMarketsBounded(now, {
+        auth: kalshiAuthFromEnv(env),
+        maxPages: budget.kalshiMaxPages,
+        maxMarkets: budget.kalshiMaxMarkets,
+      });
+      kalshiMarkets = capVenue(normalizeAll(kalshi.markets, now), "kalshi", budget.kalshiMaxMarkets);
+      kalshiTruncated = kalshi.truncated;
+    }
+    {
+      const poly = await fetchPolymarketIngestRows(now, {
+        env: env as unknown as Record<string, string | undefined>,
+        maxMarkets: budget.polymarketMaxMarkets,
+        includeOrderBooks: false,
+      });
+      polyMarkets = capVenue(normalizeAll(poly.rows, now), "polymarket", budget.polymarketMaxMarkets);
+      polymarketTruncated = poly.truncated;
+    }
   }
-
-  const kalshiMarkets = capVenue(normalizeAll(kalshiRaw, now), "kalshi", budget.kalshiMaxMarkets);
-  const polyMarkets = capVenue(normalizeAll(polyRaw, now), "polymarket", budget.polymarketMaxMarkets);
   const markets = [...kalshiMarkets, ...polyMarkets];
   const pairs = matchCrossVenue(markets);
   const r2Keys: string[] = [];

@@ -1,3 +1,4 @@
+import { slimPolymarketRaw } from "../ingest-budget.ts";
 import { polymarketConfigFromEnv } from "../polymarket/config.ts";
 import { runPolymarketSnapshot } from "../polymarket/snapshot.ts";
 import type { PolymarketSnapshotResult } from "../polymarket/types.ts";
@@ -28,6 +29,30 @@ export async function fetchPolymarketSnapshot(
   return {
     ...result,
     legacyRawMarkets: result.legacyRawMarkets.map((row) => ({ ...row, fetched_at: fetchedAt })),
+  };
+}
+
+export interface PolymarketIngestRows {
+  rows: Record<string, unknown>[];
+  truncated: boolean;
+  marketsEnriched: number;
+  snapshotsStored: number;
+}
+
+/**
+ * Slim rows for ingest and discover. The snapshot graph (gamma rows, events,
+ * tokens, price snapshots) stays inside this function and is not returned.
+ */
+export async function fetchPolymarketIngestRows(
+  fetchedAt: string,
+  options: PolymarketFetchOptions = {},
+): Promise<PolymarketIngestRows> {
+  const snapshot = await fetchPolymarketSnapshot(fetchedAt, options);
+  return {
+    rows: snapshot.legacyRawMarkets.map(slimPolymarketRaw),
+    truncated: Boolean(snapshot.truncated),
+    marketsEnriched: snapshot.run.marketsEnriched,
+    snapshotsStored: snapshot.run.snapshotsStored,
   };
 }
 

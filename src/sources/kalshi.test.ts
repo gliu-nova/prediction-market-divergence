@@ -75,10 +75,11 @@ describe("filterMveParlayMarkets", () => {
 });
 
 describe("buildKalshiMarketsUrl", () => {
-  it("uses limit=1000, open status, and excludes MVE markets on the first page", () => {
+  it("requests one page of 400 open markets and excludes MVE markets", () => {
+    assert.equal(KALSHI_MARKETS_PAGE_LIMIT, 400);
     const url = buildKalshiMarketsUrl(null);
     const parsed = new URL(url);
-    assert.equal(parsed.searchParams.get("limit"), String(KALSHI_MARKETS_PAGE_LIMIT));
+    assert.equal(parsed.searchParams.get("limit"), "400");
     assert.equal(parsed.searchParams.get("status"), "open");
     assert.equal(parsed.searchParams.get("mve_filter"), "exclude");
     assert.equal(parsed.searchParams.has("cursor"), false);
@@ -121,7 +122,7 @@ describe("fetchKalshiMarketsPages", () => {
     assert.equal(pages[2]?.marketCount, 3);
 
     assert.equal(urls.length, 3);
-    assert.match(urls[0] ?? "", /limit=1000/);
+    assert.match(urls[0] ?? "", /limit=400/);
     assert.match(urls[0] ?? "", /mve_filter=exclude/);
     assert.match(urls[1] ?? "", /cursor=page-2/);
     assert.match(urls[2] ?? "", /cursor=page-3/);
@@ -157,7 +158,7 @@ describe("fetchKalshiMarketsPages", () => {
   });
 
   it("defaults maxPages to KALSHI_MAX_PAGES", () => {
-    assert.equal(KALSHI_MAX_PAGES, 2);
+    assert.equal(KALSHI_MAX_PAGES, 1);
   });
 
   it("waits between pages when pageThrottleMs is set", async () => {
@@ -167,7 +168,7 @@ describe("fetchKalshiMarketsPages", () => {
     ]);
 
     const startedAt = Date.now();
-    await fetchKalshiMarketsPages({ fetchFn, pageThrottleMs: 50 });
+    await fetchKalshiMarketsPages({ fetchFn, pageThrottleMs: 50, maxPages: 2 });
     assert.ok(Date.now() - startedAt >= 45);
   });
 });
@@ -179,7 +180,11 @@ describe("fetchKalshiMarkets", () => {
       { markets: [market("TWO"), market("THREE")], cursor: null },
     ]);
 
-    const result = await fetchKalshiMarkets("2026-06-26T00:00:00.000Z", { fetchFn, pageThrottleMs: 0 });
+    const result = await fetchKalshiMarkets("2026-06-26T00:00:00.000Z", {
+      fetchFn,
+      pageThrottleMs: 0,
+      maxPages: 2,
+    });
 
     assert.equal(result.pages.length, 2);
     assert.equal(result.truncated, false);
@@ -258,6 +263,27 @@ describe("fetchKalshiMarketsBounded", () => {
     assert.equal(urls.length, 2);
     assert.equal("rules_primary" in (result.markets[0] ?? {}), false);
     assert.equal("rules_secondary" in (result.markets[1] ?? {}), false);
+  });
+
+  it("stops after the default single page when another page exists", async () => {
+    const { fetchFn, urls } = createPaginatedFetch([
+      { markets: [market("KEEP")], cursor: "page-2" },
+      { markets: [market("SKIP")], cursor: null },
+    ]);
+
+    const result = await fetchKalshiMarketsBounded("2026-10-08T00:00:00.000Z", {
+      fetchFn,
+      pageThrottleMs: 0,
+    });
+
+    assert.equal(result.pages_fetched, 1);
+    assert.equal(result.truncated, true);
+    assert.equal(urls.length, 1);
+    assert.match(urls[0] ?? "", /limit=400/);
+    assert.deepEqual(
+      result.markets.map((row) => row.ticker),
+      ["KEEP"],
+    );
   });
 });
 

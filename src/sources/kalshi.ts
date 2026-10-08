@@ -7,8 +7,9 @@ import {
 } from "./kalshi-auth.ts";
 
 export const KALSHI_BASE_URL = "https://api.elections.kalshi.com/trade-api/v2";
-export const KALSHI_MARKETS_PAGE_LIMIT = 1000;
-/** Re-export so callers share the ingest budget. Default is 2 pages, not the old 5. */
+/** One page is parsed whole. 400 matches the default markets kept per run. */
+export const KALSHI_MARKETS_PAGE_LIMIT = 400;
+/** Re-export so callers share the ingest budget. Default is 1 page, not the old 5. */
 export { KALSHI_MAX_PAGES };
 export const KALSHI_PAGE_THROTTLE_MS = 1500;
 export const KALSHI_MAX_RETRIES = 2;

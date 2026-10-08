@@ -62,13 +62,14 @@ One Pages invocation stays inside the 128MB isolate limit. Defaults are clamped 
 
 | Cap | Default | Ceiling |
 |-----|---------|---------|
-| Kalshi pages scanned per run | 2 | 3 |
+| Kalshi pages scanned per run | 1 | 3 |
+| Kalshi markets per page | 400 | 400 |
 | Kalshi markets kept (highest volume in those pages) | 400 | 500 |
 | Polymarket markets | 100 | 100 |
 | Polymarket Gamma pages | 2 | 2 |
 | Worker CPU | 60s (`[limits] cpu_ms`) | plan max |
 
-Kalshi is fetched one page at a time and only ticker, title, price, volume, and liquidity are kept. Ingest archives rows whose price changed. Discover writes the capped catalog archive. Neither job stores raw Kalshi pages. Ingest updates the browse snapshot in place and does not copy the previous Kalshi rows.
+Kalshi is fetched as one page of 400 markets. Only ticker, title, price, volume, and liquidity are kept, and the raw page is dropped before D1 and R2 writes. Ingest compares those markets to their own `latest_prices` rows and archives prices that changed. Discover writes the capped catalog archive. Neither job stores raw Kalshi pages. Ingest updates the browse snapshot in place and does not copy the previous Kalshi rows.
 
 ```
 API fetch → R2 (capped JSONL.gz) + D1 (latest_prices, markets)
@@ -287,7 +288,7 @@ Discover writes the capped catalog to R2. Ingest writes only changed prices. Com
 | `POLYMARKET_CLOB_URL` | `https://clob.polymarket.com` | Prices + books |
 | `POLYMARKET_CLOB_WS_URL` | `wss://ws-subscriptions-clob.polymarket.com/ws/market` | CLI streaming |
 | `POLYMARKET_DATA_API_URL` | `https://data-api.polymarket.com` | Trades backfill |
-| `KALSHI_MAX_PAGES` | `2` | Kalshi pages scanned per run (ceiling 3) |
+| `KALSHI_MAX_PAGES` | `1` | Kalshi pages scanned per run (ceiling 3, 400 markets each) |
 | `KALSHI_MAX_MARKETS` | `400` | Kalshi markets kept per run (ceiling 500) |
 | `POLYMARKET_MAX_MARKETS` | `100` | Max markets per poll/snapshot (ceiling 100) |
 | `POLYMARKET_MAX_GAMMA_PAGES` | `2` | Gamma pagination cap (ceiling 2) |

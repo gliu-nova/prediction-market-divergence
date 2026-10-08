@@ -5,13 +5,14 @@ import {
   loadActiveMarketKeys,
   setJobState,
   upsertLatestPricesIfChanged,
+  type MarketKey,
 } from "../d1/tiered.ts";
-import { capByVolume, ingestBudgetFromEnv, slimPolymarketRaw } from "../ingest-budget.ts";
+import { capByVolume, ingestBudgetFromEnv, type IngestBudget } from "../ingest-budget.ts";
 import { matchCrossVenue } from "../matcher.ts";
 import { normalizeRawMarket } from "../normalize.ts";
 import { fetchMockMarkets } from "../sources/mock.ts";
 import { fetchKalshiMarketsBounded, kalshiAuthFromEnv } from "../sources/kalshi.ts";
-import { fetchPolymarketSnapshot } from "../sources/polymarket.ts";
+import { fetchPolymarketIngestRows } from "../sources/polymarket.ts";
 import {
   ensureTables,
   getLastIngestionPollTs,
@@ -49,11 +50,99 @@ function normalizeAll(rows: Record<string, unknown>[], observedAt: string): Cano
   return markets;
 }
 
+interface LoadedVenues {
+  kalshiMarkets: CanonicalMarket[];
+  polyMarkets: CanonicalMarket[];
+  kalshiTruncated: boolean;
+  polymarketTruncated: boolean;
+  polyEnriched: number | null;
+  polyStored: number | null;
+}
+
+function capNormalized(
+  rows: Record<string, unknown>[],
+  venue: CanonicalMarket["venue"],
+  observedAt: string,
+  max: number,
+  tracked: Set<MarketKey> | null,
+): CanonicalMarket[] {
+  const normalized = normalizeAll(rows, observedAt);
+  const scoped = tracked ? filterMarketsToTracked(normalized, tracked) : normalized;
+  return capVenue(scoped, venue, max);
+}
+
+/**
+ * Fetch and project one venue at a time. Raw pages and the Polymarket snapshot
+ * graph stay in this function so they can be collected before D1 and R2 writes.
+ */
+async function loadIngestMarkets(
+  env: Env,
+  budget: IngestBudget,
+  observedAt: string,
+  useMock: boolean,
+  tracked: Set<MarketKey> | null,
+): Promise<LoadedVenues> {
+  if (useMock) {
+    return {
+      kalshiMarkets: capNormalized(
+        fetchMockMarkets("kalshi", observedAt),
+        "kalshi",
+        observedAt,
+        budget.kalshiMaxMarkets,
+        null,
+      ),
+      polyMarkets: capNormalized(
+        fetchMockMarkets("polymarket", observedAt),
+        "polymarket",
+        observedAt,
+        budget.polymarketMaxMarkets,
+        null,
+      ),
+      kalshiTruncated: false,
+      polymarketTruncated: false,
+      polyEnriched: null,
+      polyStored: null,
+    };
+  }
+
+  let kalshiMarkets: CanonicalMarket[] = [];
+  let kalshiTruncated = false;
+  {
+    const kalshi = await fetchKalshiMarketsBounded(observedAt, {
+      auth: kalshiAuthFromEnv(env),
+      maxPages: budget.kalshiMaxPages,
+      maxMarkets: budget.kalshiMaxMarkets,
+    });
+    kalshiMarkets = capNormalized(
+      kalshi.markets,
+      "kalshi",
+      observedAt,
+      budget.kalshiMaxMarkets,
+      tracked,
+    );
+    kalshiTruncated = kalshi.truncated;
+  }
+
+  const poly = await fetchPolymarketIngestRows(observedAt, {
+    env: env as unknown as Record<string, string | undefined>,
+    maxMarkets: budget.polymarketMaxMarkets,
+    includeOrderBooks: false,
+  });
+  return {
+    kalshiMarkets,
+    polyMarkets: capNormalized(poly.rows, "polymarket", observedAt, budget.polymarketMaxMarkets, tracked),
+    kalshiTruncated,
+    polymarketTruncated: poly.truncated,
+    polyEnriched: poly.marketsEnriched,
+    polyStored: poly.snapshotsStored,
+  };
+}
+
 /**
  * Price refresh for tracked markets.
  * Discover owns the catalog snapshot and the full R2 archive. This path
- * fetches one Kalshi page at a time, keeps a capped slim set, and archives
- * only prices that changed.
+ * fetches one Kalshi page, keeps a capped slim set, and archives only prices
+ * that changed.
  */
 export async function runIngestSnapshots(env: Env): Promise<IngestResult> {
   const config = loadConfig(env);
@@ -67,42 +156,8 @@ export async function runIngestSnapshots(env: Env): Promise<IngestResult> {
     throw new Error("No tracked markets in D1; run POST /jobs/discover first");
   }
 
-  let kalshiRaw: Record<string, unknown>[] = [];
-  let polyRaw: Record<string, unknown>[] = [];
-  let kalshiTruncated = false;
-  let polymarketTruncated = false;
-  let polyEnriched: number | null = null;
-  let polyStored: number | null = null;
-
-  if (config.useMock) {
-    kalshiRaw = fetchMockMarkets("kalshi", ingestTs);
-    polyRaw = fetchMockMarkets("polymarket", ingestTs);
-  } else {
-    // One venue at a time so the two upstream payloads are not live together.
-    const kalshi = await fetchKalshiMarketsBounded(ingestTs, {
-      auth: kalshiAuthFromEnv(env),
-      maxPages: budget.kalshiMaxPages,
-      maxMarkets: budget.kalshiMaxMarkets,
-    });
-    kalshiRaw = kalshi.markets;
-    kalshiTruncated = kalshi.truncated;
-
-    const polySnap = await fetchPolymarketSnapshot(ingestTs, {
-      env: env as unknown as Record<string, string | undefined>,
-      maxMarkets: budget.polymarketMaxMarkets,
-      includeOrderBooks: false,
-    });
-    polyRaw = polySnap.legacyRawMarkets.map(slimPolymarketRaw);
-    polymarketTruncated = Boolean(polySnap.truncated);
-    polyEnriched = polySnap.run.marketsEnriched;
-    polyStored = polySnap.run.snapshotsStored;
-  }
-
-  const scoped = config.useMock
-    ? normalizeAll([...kalshiRaw, ...polyRaw], ingestTs)
-    : filterMarketsToTracked(normalizeAll([...kalshiRaw, ...polyRaw], ingestTs), tracked);
-  const kalshiMarkets = capVenue(scoped, "kalshi", budget.kalshiMaxMarkets);
-  const polyMarkets = capVenue(scoped, "polymarket", budget.polymarketMaxMarkets);
+  const loaded = await loadIngestMarkets(env, budget, ingestTs, config.useMock, config.useMock ? null : tracked);
+  const { kalshiMarkets, polyMarkets } = loaded;
   const scopedMarkets = [...kalshiMarkets, ...polyMarkets];
   const pairs = matchCrossVenue(scopedMarkets);
   const r2Keys: string[] = [];
@@ -138,14 +193,14 @@ export async function runIngestSnapshots(env: Env): Promise<IngestResult> {
       kalshi_markets: kalshiMarkets.length,
       polymarket_markets: polyMarkets.length,
       prices_written: priceWrite.written,
-      poly_markets_enriched: polyEnriched,
-      poly_snapshots_stored: polyStored,
+      poly_markets_enriched: loaded.polyEnriched,
+      poly_snapshots_stored: loaded.polyStored,
     },
     { advanceSnapshotTs: false },
   );
   await setJobState(env.DB, "last_ingest_at", ingestTs);
-  await setJobState(env.DB, "last_kalshi_truncated", kalshiTruncated ? "1" : "0");
-  await setJobState(env.DB, "last_polymarket_truncated", polymarketTruncated ? "1" : "0");
+  await setJobState(env.DB, "last_kalshi_truncated", loaded.kalshiTruncated ? "1" : "0");
+  await setJobState(env.DB, "last_polymarket_truncated", loaded.polymarketTruncated ? "1" : "0");
 
   return {
     markets: scopedMarkets.length,
@@ -154,8 +209,8 @@ export async function runIngestSnapshots(env: Env): Promise<IngestResult> {
     polymarket_markets: polyMarkets.length,
     prices_written: priceWrite.written,
     prices_skipped: priceWrite.skipped,
-    kalshi_truncated: kalshiTruncated,
-    polymarket_truncated: polymarketTruncated,
+    kalshi_truncated: loaded.kalshiTruncated,
+    polymarket_truncated: loaded.polymarketTruncated,
     r2_keys: r2Keys,
   };
 }

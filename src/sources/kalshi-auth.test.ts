@@ -11,7 +11,7 @@ import {
 describe("kalshiSignPath", () => {
   it("uses pathname only, without query parameters", () => {
     const url =
-      "https://api.elections.kalshi.com/trade-api/v2/markets?limit=1000&status=open&cursor=abc";
+      "https://api.elections.kalshi.com/trade-api/v2/markets?limit=400&status=open&cursor=abc";
     assert.equal(kalshiSignPath(url), "/trade-api/v2/markets");
   });
 });

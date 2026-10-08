@@ -23,7 +23,8 @@ OPPORTUNITY_MAX_AGE_HOURS = "24"
 OBSERVATION_RETENTION_DAYS = "30"
 # Caps are clamped again in src/ingest-budget.ts. Raising these in the dashboard
 # cannot exceed 3 Kalshi pages, 500 Kalshi markets, or 100 Polymarket markets.
-KALSHI_MAX_PAGES = "2"
+# Each Kalshi page is 400 markets (KALSHI_MARKETS_PAGE_LIMIT). Default is one page.
+KALSHI_MAX_PAGES = "1"
 KALSHI_MAX_MARKETS = "400"
 POLYMARKET_MAX_MARKETS = "100"
 POLYMARKET_MAX_GAMMA_PAGES = "2"
