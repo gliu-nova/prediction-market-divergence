@@ -14,6 +14,49 @@ function marketsKey(source: ArchiveSource, ts: string, runId?: string): string {
   return `${source}/markets/${day}/${hour}${suffix}.jsonl.gz`;
 }
 
+/** Stable index for one venue-day. Research can fetch this without guessing timestamps. */
+export function marketsManifestKey(source: ArchiveSource, day: string): string {
+  return `${source}/markets/${day}/manifest.json`;
+}
+
+/** Append one archive key. A corrupt or non-object body is replaced by the new key. */
+export function mergeManifestKeys(existing: unknown, objectKey: string): string[] {
+  const keys: string[] = [];
+  const raw = existing && typeof existing === "object" ? (existing as { keys?: unknown }).keys : undefined;
+  if (Array.isArray(raw)) {
+    for (const key of raw) {
+      if (typeof key === "string" && key.length > 0 && key !== objectKey && !keys.includes(key)) {
+        keys.push(key);
+      }
+    }
+  }
+  keys.push(objectKey);
+  return keys;
+}
+
+async function recordManifestKey(
+  bucket: R2Bucket,
+  source: ArchiveSource,
+  ingestTs: string,
+  objectKey: string,
+): Promise<void> {
+  const key = marketsManifestKey(source, ingestTs.slice(0, 10));
+  let existing: unknown = null;
+  const current = await bucket.get(key);
+  if (current) {
+    try {
+      existing = JSON.parse(await current.text());
+    } catch {
+      existing = null;
+    }
+  }
+  // Two writers can race this read-modify-write. The research sync also lists
+  // the day prefix, so a key dropped here is still downloaded.
+  await bucket.put(key, JSON.stringify({ keys: mergeManifestKeys(existing, objectKey) }), {
+    httpMetadata: { contentType: "application/json" },
+  });
+}
+
 function runIdFromTs(ts: string): string {
   // Compact unique suffix from ISO timestamp (safe for object keys).
   return ts.replace(/[-:TZ.]/g, "").slice(0, 14);
@@ -108,6 +151,7 @@ export async function archiveMarketSnapshot(
   };
   // Unique per-run key. Write once so we do not read an existing object back into memory.
   await putJsonlGz(bucket, key, payload);
+  await recordManifestKey(bucket, source, ingestTs, key);
   return key;
 }
 

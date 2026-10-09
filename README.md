@@ -7,7 +7,7 @@ Cross-venue prediction market signal engine (Kalshi ↔ Polymarket). Detects pro
 | Layer | Store | Purpose |
 |-------|-------|---------|
 | Live / serving | **D1** | `markets`, `latest_prices`, `signals` (active opportunities), `opportunity_events`, `indicator_summaries`, `cooldowns`, `bot_posts` |
-| Raw archive | **R2** | Partitioned JSONL.gz: `polymarket/markets/YYYY-MM-DD/HH.jsonl.gz`, `kalshi/markets/...`, `polymarket/orderbooks/YYYY-MM-DD/{market_id}.jsonl.gz` |
+| Raw archive | **R2** | Partitioned JSONL.gz: `polymarket/markets/YYYY-MM-DD/HH-<YYYYMMDDHHMMSS>.jsonl.gz`, a daily `manifest.json` beside those objects, `kalshi/markets/...`, `polymarket/orderbooks/YYYY-MM-DD/{market_id}.jsonl.gz` |
 | Research | **Local DuckDB** | Heavy percentiles, gap stats, backtest features from downloaded R2 files → compact rows pushed back to D1 |
 
 The live bot path reads **D1 only** — never R2 or DuckDB directly.
@@ -278,7 +278,7 @@ Polymarket data is ingested through modular pipelines under `src/polymarket/`:
 | `d1/tiered.ts` | Cloudflare D1 | `markets`, `latest_prices`, `indicator_summaries`, etc. |
 | `storage-local.ts` | `data/polymarket/` | Local JSON snapshots for CLI workflows |
 
-Discover writes the capped catalog to R2. Ingest writes only changed prices. Compact live state stays in D1. Historical price/book detail is **not** stored long-term in D1.
+Discover writes the capped catalog to R2. Ingest writes only changed prices. Each market archive is one object, `{source}/markets/YYYY-MM-DD/HH-<YYYYMMDDHHMMSS>.jsonl.gz`, and its key is appended to `{source}/markets/YYYY-MM-DD/manifest.json`. Compact live state stays in D1. Historical price/book detail is **not** stored long-term in D1.
 
 ### Environment variables
 
@@ -325,7 +325,7 @@ python pm.py status
 
 Or from repo root: `npm run research:daily`
 
-Requires `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` for R2/D1 wrangler calls.
+Requires `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. Sync reads each day's `manifest.json` and lists the day prefix. Listing uses the Cloudflare REST API, then downloads with `wrangler r2 object get <bucket>/<key> --file <dest> --remote`. Set `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` to list and download through the R2 S3 API instead. D1 pushes still use wrangler. The daily workflow passes the S3 secrets when they are set.
 
 ### D1 live tables (tiered)
 
