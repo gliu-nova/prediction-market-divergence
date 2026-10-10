@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.progress import Progress
 
 from lib.d1_push import push_indicator_summaries
-from lib.features import compute_indicator_summaries, load_snapshots_into_duckdb
+from lib.features import compute_indicator_summaries, indicator_since, load_snapshots_into_duckdb
 from lib.r2_sync import sync_markets_range
 
 app = typer.Typer(help="Prediction market research pipeline (R2 → DuckDB → D1)")
@@ -106,8 +106,10 @@ def run_daily(
     """Daily batch: sync R2 → DuckDB features → D1 summaries."""
     if since is None:
         since = (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
-    sync_r2(source="all", since=since, until=since, bucket=bucket, cache_dir=cache_dir, verbose=False, dry_run=dry_run)
-    build_features(since=since, until=since, cache_dir=cache_dir, duckdb_path=duckdb_path, dry_run=dry_run)
+    # The report day plus the day before. The 24h change needs that baseline.
+    start = indicator_since(since)
+    sync_r2(source="all", since=start, until=since, bucket=bucket, cache_dir=cache_dir, verbose=False, dry_run=dry_run)
+    build_features(since=start, until=since, cache_dir=cache_dir, duckdb_path=duckdb_path, dry_run=dry_run)
     push_d1(since=since, database=database, duckdb_path=duckdb_path, dry_run=dry_run)
     console.print("[green]daily research pipeline complete[/]")
 

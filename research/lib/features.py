@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import duckdb
+
+
+def indicator_since(day: str) -> str:
+    """UTC day before `day`, so a 24h change has a baseline snapshot."""
+    return (date.fromisoformat(day) - timedelta(days=1)).isoformat()
 
 
 def _parse_ts(value: str | None) -> datetime | None:
@@ -95,25 +100,38 @@ def compute_indicator_summaries(con: duckdb.DuckDBPyConnection, computed_at: str
           WHERE match_key IS NOT NULL AND match_key != ''
         ),
         latest AS (
-          SELECT match_key, venue, probability AS prob_now, volume AS vol_now
+          SELECT match_key, venue, probability AS prob_now, volume AS vol_now, ingest_ts
           FROM (
             SELECT *, row_number() OVER (PARTITION BY match_key, venue ORDER BY ingest_ts DESC) AS rn
             FROM parsed
           ) t WHERE rn = 1
         ),
+        timed AS (
+          SELECT
+            match_key,
+            venue,
+            probability,
+            ingest_ts,
+            max(ingest_ts) OVER (PARTITION BY match_key, venue) AS latest_ingest_ts
+          FROM parsed
+        ),
         hist_1h AS (
-          SELECT p.match_key, p.venue, p.probability AS prob_1h
-          FROM parsed p
-          JOIN latest l ON l.match_key = p.match_key AND l.venue = p.venue
-          WHERE p.ingest_ts <= l.ingest_ts - INTERVAL 1 HOUR
-          QUALIFY row_number() OVER (PARTITION BY p.match_key, p.venue ORDER BY p.ingest_ts DESC) = 1
+          SELECT t.match_key, t.venue, t.probability AS prob_1h
+          FROM timed t
+          JOIN latest l ON l.match_key = t.match_key AND l.venue = t.venue
+          -- l.ingest_ts is the newest row. latest_ingest_ts is that same time
+          -- as a window, so either definition can supply the cutoff.
+          WHERE t.ingest_ts <= l.ingest_ts - INTERVAL 1 HOUR
+            AND t.latest_ingest_ts = l.ingest_ts
+          QUALIFY row_number() OVER (PARTITION BY t.match_key, t.venue ORDER BY t.ingest_ts DESC) = 1
         ),
         hist_24h AS (
-          SELECT p.match_key, p.venue, p.probability AS prob_24h
-          FROM parsed p
-          JOIN latest l ON l.match_key = p.match_key AND l.venue = p.venue
-          WHERE p.ingest_ts <= l.ingest_ts - INTERVAL 24 HOUR
-          QUALIFY row_number() OVER (PARTITION BY p.match_key, p.venue ORDER BY p.ingest_ts DESC) = 1
+          SELECT t.match_key, t.venue, t.probability AS prob_24h
+          FROM timed t
+          JOIN latest l ON l.match_key = t.match_key AND l.venue = t.venue
+          WHERE t.ingest_ts <= l.ingest_ts - INTERVAL 24 HOUR
+            AND t.latest_ingest_ts = l.ingest_ts
+          QUALIFY row_number() OVER (PARTITION BY t.match_key, t.venue ORDER BY t.ingest_ts DESC) = 1
         ),
         gap_stats AS (
           SELECT
@@ -133,7 +151,7 @@ def compute_indicator_summaries(con: duckdb.DuckDBPyConnection, computed_at: str
           (l.prob_now - h1.prob_1h) * 100 AS prob_change_1h,
           (l.prob_now - h24.prob_24h) * 100 AS prob_change_24h,
           g.max_gap_30d,
-          percentile_cont(0.5) WITHIN GROUP (ORDER BY l.vol_now) OVER () AS volume_p50
+          quantile_cont(l.vol_now, 0.5) OVER () AS volume_p50
         FROM latest l
         LEFT JOIN hist_1h h1 ON h1.match_key = l.match_key AND h1.venue = l.venue
         LEFT JOIN hist_24h h24 ON h24.match_key = l.match_key AND h24.venue = l.venue

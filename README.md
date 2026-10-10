@@ -319,7 +319,7 @@ cd research
 python pm.py sync-r2 --since 2026-06-01      # download R2 archives locally
 python pm.py build-features --since 2026-06-01
 python pm.py push-d1 --since 2026-06-01      # write indicator_summaries to D1
-python pm.py run-daily                       # full daily batch (yesterday UTC)
+python pm.py run-daily                       # yesterday UTC, plus the prior day for 24h change
 python pm.py status
 ```
 
