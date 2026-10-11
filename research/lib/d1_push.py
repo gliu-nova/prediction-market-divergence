@@ -8,6 +8,68 @@ import tempfile
 from pathlib import Path
 
 
+EXPORT_QUERY = "SELECT * FROM indicator_summaries_export"
+
+
+def none_if_nan(value):
+    """SQL NULL stays None. pandas/numpy NaN becomes None so SQL does not emit nan."""
+    if value is None:
+        return None
+    if type(value).__name__ in {"NAType", "NaTType"}:
+        return None
+    try:
+        missing = value != value
+    except Exception:
+        return None
+    if missing is True:
+        return None
+    return value
+
+
+def rows_from_tuples(columns: list[str], tuples) -> list[dict]:
+    return [{column: none_if_nan(value) for column, value in zip(columns, row)} for row in tuples]
+
+
+def rows_from_records(records: list[dict]) -> list[dict]:
+    return [{key: none_if_nan(value) for key, value in row.items()} for row in records]
+
+
+def _fetchall_rows(connection, query: str) -> list[dict]:
+    result = connection.execute(query)
+    columns = [column[0] for column in result.description]
+    return rows_from_tuples(columns, result.fetchall())
+
+
+def _fetchdf_rows(connection, query: str) -> list[dict] | None:
+    """DataFrame read. None when pandas or numpy is not installed."""
+    try:
+        frame = connection.execute(query).fetchdf()
+    except ModuleNotFoundError:
+        return None
+    except Exception as exc:
+        message = str(exc).lower()
+        if "pandas" in message or "numpy" in message:
+            return None
+        raise
+    return rows_from_records(frame.to_dict("records"))
+
+
+def read_indicator_rows(connection) -> list[dict]:
+    """Rows to push. fetchall is the source of truth and keeps SQL NULL as None.
+
+    When pandas and numpy are installed, fetchdf runs too. Its NaNs are
+    normalized, and a row-count mismatch is a real error. Numpy alone cannot
+    satisfy fetchdf; that path needs pandas, which brings numpy with it.
+    """
+    rows = _fetchall_rows(connection, EXPORT_QUERY)
+    framed = _fetchdf_rows(connection, EXPORT_QUERY)
+    if framed is not None and len(framed) != len(rows):
+        raise RuntimeError(
+            f"fetchdf returned {len(framed)} indicator rows, fetchall returned {len(rows)}"
+        )
+    return rows
+
+
 def push_indicator_summaries(database: str, rows: list[dict], batch_size: int = 100) -> int:
     if not rows:
         return 0
@@ -54,6 +116,7 @@ def sql_quote(value: str) -> str:
 
 
 def sql_num(value) -> str:
+    value = none_if_nan(value)
     if value is None:
         return "NULL"
     return str(float(value))

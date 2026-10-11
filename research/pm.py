@@ -11,7 +11,7 @@ import typer
 from rich.console import Console
 from rich.progress import Progress
 
-from lib.d1_push import push_indicator_summaries
+from lib.d1_push import push_indicator_summaries, read_indicator_rows
 from lib.features import compute_indicator_summaries, indicator_since, load_snapshots_into_duckdb
 from lib.r2_sync import sync_markets_range
 
@@ -84,7 +84,7 @@ def push_d1(
         raise typer.Exit("DuckDB file missing — run build-features first")
     con = duckdb.connect(str(duckdb_path), read_only=True)
     try:
-        rows = con.execute("SELECT * FROM indicator_summaries_export").fetchdf().to_dict("records")
+        rows = read_indicator_rows(con)
     finally:
         con.close()
     if dry_run:
